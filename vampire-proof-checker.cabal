@@ -1,0 +1,48 @@
+cabal-version:      2.2
+name:               vampire-proof-checker
+version:            0.1.0.0
+synopsis:           A simple tool to check proofs with the vampire theorem prover
+-- description:
+license:            GPL-3.0-or-later
+license-file:       LICENSE
+author:             Jakob Rath
+maintainer:         git@jakobrath.eu
+category:           Logic
+build-type:         Simple
+extra-source-files: README.md
+
+common warnings
+  ghc-options:      -Wall
+                    -Wcompat
+                    -Wincomplete-record-updates
+                    -Wincomplete-uni-patterns
+                    -Wredundant-constraints
+                    -Wnoncanonical-monad-instances
+
+-- library
+--   import:           warnings
+--   exposed-modules:  Logic.ASP.Parser
+--                   , Logic.ASP.Types
+--   build-depends:    base >=4.11 && <4.12
+--                   , bimap
+--                   , containers
+--                   , hashable
+--                   , megaparsec
+--                   , prettyprinter
+--                   , QuickCheck
+--                   , text
+--   hs-source-dirs:   src
+--   default-language: Haskell2010
+
+executable vampire-proof-check
+  import:           warnings
+  main-is:          Main.hs
+  build-depends:    base >=4.11 && <4.12
+                  -- , vampire-proof-checker
+                  , containers
+                  , megaparsec
+                  , optparse-applicative
+                  , parser-combinators
+                  , text
+  hs-source-dirs:   src
+  default-language: Haskell2010
