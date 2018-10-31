@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -12,7 +13,7 @@ import Data.Either ( partitionEithers )
 import Data.Void ( Void )
 
 -- containers
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 
 -- megaparsec
 import Text.Megaparsec
@@ -22,8 +23,11 @@ import Text.Megaparsec
 import Text.Megaparsec.Char ( space1 )
 import qualified Text.Megaparsec.Char.Lexer as L
 
+-- mtl
+import Control.Monad.Except ( MonadError(..) )
+
 -- parser-combinators
-import Control.Applicative.Combinators ( sepBy1 )
+import Control.Applicative.Combinators ( sepBy )
 
 -- text
 import Data.Text ( Text )
@@ -78,7 +82,7 @@ statementP = do
   conclusion <- formulaP
   let wordP = lexemeNamed "premise-word" $ takeWhile1P Nothing isAlpha
       premise = (Right <$> idP) <|> (Left <$> wordP)
-  premises <- symbol "[" *> sepBy1 premise (symbol ",") <* symbol "]"
+  premises <- symbol "[" *> sepBy premise (symbol ",") <* symbol "]"
   let stmt' = case premises of
                 [ Left "axiom" ] -> Right $ Axiom conclusion
                 ps -> case sequenceA ps of
@@ -99,10 +103,14 @@ proofP = do
   let proofStatements = Map.fromList stmts
   return Proof{..}
 
-parseProof' :: SourcePos -> Text -> Either String Proof
+parseProof'
+  :: MonadError String m
+  => SourcePos
+  -> Text
+  -> m Proof
 parseProof' pos str =
   case parse p "" str of
-    Left err -> Left $ parseErrorPretty err
+    Left err -> throwError $ parseErrorPretty err
     Right e -> return e
   where
     p :: Parser Proof
@@ -112,5 +120,8 @@ parseProof' pos str =
            eof
            return prf
 
-parseProof :: Text -> Either String Proof
+parseProof
+  :: MonadError String m
+  => Text
+  -> m Proof
 parseProof = parseProof' (initialPos "<string>")

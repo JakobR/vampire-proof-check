@@ -8,12 +8,14 @@ module VampireProofChecker.Types
   , Formula(..)
   , Id(..)
   , Statement(..)
+  , isAxiom
+  , isInference
   , stmtConclusion
   , Proof(..)
   ) where
 
 -- containers
-import Data.Map ( Map )
+import Data.Map.Strict ( Map )
 
 -- text
 import Data.Text ( Text )
@@ -43,6 +45,14 @@ data Statement
   = Axiom Formula
   | Inference Formula [Id]
   deriving (Show)
+
+isAxiom :: Statement -> Bool
+isAxiom (Axiom _) = True
+isAxiom _ = False
+
+isInference :: Statement -> Bool
+isInference (Inference _ _) = True
+isInference _ = False
 
 stmtConclusion :: Statement -> Formula
 stmtConclusion (Axiom f) = f
