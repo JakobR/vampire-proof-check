@@ -19,33 +19,28 @@ common warnings
                     -Wredundant-constraints
                     -Wnoncanonical-monad-instances
 
--- library
---   import:           warnings
---   exposed-modules:  Logic.ASP.Parser
---                   , Logic.ASP.Types
---   build-depends:    base >=4.11 && <4.12
---                   , bimap
---                   , containers
---                   , hashable
---                   , megaparsec
---                   , prettyprinter
---                   , QuickCheck
---                   , text
---   hs-source-dirs:   src
---   default-language: Haskell2010
+library
+  import:           warnings
+  exposed-modules:  VampireProofChecker.Parser
+                  , VampireProofChecker.Types
+  other-modules:    VampireProofChecker.List
+  build-depends:    base >=4.11 && <4.12
+                  , containers
+                  , megaparsec
+                  , parser-combinators
+                  -- , prettyprinter
+                  -- , QuickCheck
+                  , text
+  hs-source-dirs:   src
+  default-language: Haskell2010
 
 executable vampire-proof-check
   import:           warnings
   main-is:          Main.hs
-  other-modules:    VampireProofChecker.List
-                  , VampireProofChecker.Parser
-                  , VampireProofChecker.Types
   build-depends:    base >=4.11 && <4.12
-                  -- , vampire-proof-checker
+                  , vampire-proof-checker
                   , containers
-                  , megaparsec
                   , optparse-applicative
-                  , parser-combinators
                   , text
-  hs-source-dirs:   src
+  hs-source-dirs:   app
   default-language: Haskell2010

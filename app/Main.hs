@@ -19,14 +19,6 @@ import System.Exit ( die )
 import Data.Map ( Map )
 import qualified Data.Map as Map
 
--- megaparsec
-import Text.Megaparsec (initialPos, eof, setPosition, parseErrorPretty, parse, SourcePos,  Parsec, (<?>), takeWhile1P )
-import Text.Megaparsec.Char ( space1 )
-import qualified Text.Megaparsec.Char.Lexer as L
-
--- parser-combinators
-import Control.Applicative.Combinators ( sepBy1 )
-
 -- text
 import Data.Text ( Text )
 import qualified Data.Text as Text
