@@ -92,7 +92,7 @@ checkStatementId Proof{..} checkId =
 
       case sequenceA (lookupId <$> premiseIds) of
         Left errId ->
-          throwError $ "inference " <> show checkId <> " depends on non-existing premise " <> show errId
+          throwError $ "inference depends on non-existing premise " <> show errId
         Right premises ->
           checkImplication (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
 
