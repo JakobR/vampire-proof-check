@@ -6,6 +6,7 @@ module VampireProofChecker.Types
   , Formula(..)
   , Id(..)
   , Statement(..)
+  , stmtConclusion
   , Proof(..)
   ) where
 
@@ -39,6 +40,10 @@ data Statement
   = Axiom Formula
   | Inference Formula [Id]
   deriving (Show)
+
+stmtConclusion :: Statement -> Formula
+stmtConclusion (Axiom f) = f
+stmtConclusion (Inference f _) = f
 
 data Proof = Proof
   { proofDeclarations :: [Declaration]
