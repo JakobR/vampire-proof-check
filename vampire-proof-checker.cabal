@@ -37,6 +37,9 @@ common warnings
 executable vampire-proof-check
   import:           warnings
   main-is:          Main.hs
+  other-modules:    VampireProofChecker.List
+                  , VampireProofChecker.Parser
+                  , VampireProofChecker.Types
   build-depends:    base >=4.11 && <4.12
                   -- , vampire-proof-checker
                   , containers

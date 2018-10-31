@@ -1,6 +1,7 @@
 # vampire-proof-checker
 
 A simple tool to check proofs with vampire.
+Inspired by a similar script by Bernhard Gleiss.
 
 
 ## How to build
