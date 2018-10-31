@@ -42,6 +42,8 @@ executable vampire-proof-check
   build-depends:    base >=4.11 && <4.12
                   , vampire-proof-checker
                   , containers
+                  , filepath
+                  , mtl
                   , optparse-applicative
                   , text
   main-is:          Main.hs

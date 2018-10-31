@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -6,15 +7,24 @@ module Main where
 
 -- base
 import Control.Monad ( forM_,  unless )
+import Control.Monad.IO.Class ( MonadIO(..) )
+import Data.List ( intercalate )
 import System.IO ( hPrint, stderr )
 import System.Exit ( die )
 
 -- containers
-import Data.Map ( Map )
+-- import Data.Map ( Map )
 import qualified Data.Map as Map
+
+-- filepath
+import System.FilePath.Posix ( (</>), (<.>) )
+
+-- mtl
+import Control.Monad.Reader (runReaderT,  MonadReader(..) )
 
 -- text
 import Data.Text ( Text )
+import qualified Data.Text as Text
 import qualified Data.Text.IO
 
 -- vampire-proof-checker
@@ -33,27 +43,31 @@ main = do
   input <- readInput optProofFile
   case parseProof input of
     Left err -> die $ "unable to parse input: " <> err
-    Right proof -> checkProof opts proof
+    Right proof -> flip runReaderT opts $ checkProof proof
 
 -- | Read all data from file or stdin
 readInput :: Maybe FilePath -> IO Text
 readInput Nothing = Data.Text.IO.getContents
 readInput (Just file) = Data.Text.IO.readFile file
 
-checkProof :: Options -> Proof -> IO ()
-checkProof opts proof@Proof{..} =
+checkProof
+  :: (MonadIO m, MonadReader Options m)
+  => Proof
+  -> m ()
+checkProof proof@Proof{..} = do
   forM_ (Map.keys proofStatements) $ \stmtId -> do
-    result <- checkStatementId opts proof stmtId
+    result <- checkStatementId proof stmtId
     case result of
       True -> return ()
-      False -> die $ "Check of statement " <> show stmtId <> " failed!"
+      False -> liftIO $ die $ "Check of statement " <> show stmtId <> " failed!"
+  liftIO $ putStrLn "Proof is correct!"
 
 checkStatementId
-  :: Options
-  -> Proof -- ^ the proof which is being checked
+  :: (MonadIO m, MonadReader Options m)
+  => Proof -- ^ the proof which is being checked
   -> Id    -- ^ Id of the statement that should be checked
-  -> IO Bool
-checkStatementId Options{..} Proof{..} checkId =
+  -> m Bool
+checkStatementId Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing -> fail $ "id not in db: " <> show checkId
     Just (Axiom _) ->
@@ -67,6 +81,7 @@ checkStatementId Options{..} Proof{..} checkId =
       case sequenceA ((`Map.lookup` proofStatements) <$> premiseIds) of
         Nothing -> fail $ "inference depends on non-existing premise: " <> show checkId
         Just premises -> do
+          Options{..} <- ask
           let
             assertExpr :: Expr Text -> Expr Text
             assertExpr e = SExpr [ Value "assert", e ]
@@ -76,9 +91,26 @@ checkStatementId Options{..} Proof{..} checkId =
             exprs = (unDecl <$> proofDeclarations)
                     <> premiseAssertions
                     <> [conclusionAssertion]
-          vampireResult <- runVampire optVampireExe optVampireTimeout exprs
+            vampireInput = intercalate "\n" (showExpr <$> exprs)
+            outputBasename = (</> ("inference_" ++ show checkId)) <$> optVampireOutputDir
+
+          forM_ outputBasename $ \basename ->
+            liftIO $ writeFile (basename <.> ".in.smt2") vampireInput
+
+          (vampireResult, vampireOutput, vampireError) <-
+            runVampire optVampireExe optVampireTimeout vampireInput
+
+          forM_ outputBasename $ \basename -> do
+            liftIO $ writeFile (basename <.> ".vout") vampireOutput
+            liftIO $ writeFile (basename <.> ".verr") vampireError
+
           case vampireResult of
             Satisfiable -> return False
             Refutation -> return True
             Timeout -> fail "timeout"
             Error err -> fail $ "vampire: " <> err
+
+
+showExpr :: Expr Text -> String
+showExpr (Value v) = Text.unpack v
+showExpr (SExpr xs) = "(" <> intercalate " " (showExpr <$> xs) <> ")"

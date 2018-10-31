@@ -1,4 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module VampireProofChecker.Types
   ( Expr(..)
@@ -33,7 +35,8 @@ newtype Formula = Formula { unFormula :: Expr Text }
 
 -- | Id of a statement
 newtype Id = Id { unId :: Integer }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+  deriving newtype (Show)
 
 -- | A statement of the proof (axiom or inferred from previous statements)
 data Statement

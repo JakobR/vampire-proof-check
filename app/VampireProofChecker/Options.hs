@@ -15,6 +15,7 @@ type Seconds = Int
 data Options = Options
   { optVampireExe :: FilePath
   , optVampireTimeout :: Seconds
+  , optVampireOutputDir :: Maybe FilePath
   , optProofFile :: Maybe FilePath
   }
   deriving (Show)
@@ -23,6 +24,7 @@ optionsParser :: Parser Options
 optionsParser =
   Options <$> vampireExe
           <*> vampireTimeout
+          <*> optional vampireOutputDir
           <*> optional proofFile
   where
     vampireExe = strOption (long "vampire-exe"
@@ -36,6 +38,9 @@ optionsParser =
                                   <> value 5
                                   <> showDefault
                                   <> metavar "SECONDS")
+    vampireOutputDir = strOption (long "vampire-output-dir"
+                                  <> help "Path to directory where vampire output should be stored"
+                                  <> metavar "PATH")
     proofFile = argument str (help "Path to the proof file. If not specified, read from stdin."
                               <> metavar "PROOF-FILE")
 

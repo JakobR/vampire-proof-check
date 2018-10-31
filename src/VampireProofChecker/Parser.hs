@@ -75,15 +75,15 @@ formulaP = Formula <$> sexpr
 statementP :: Parser (Id, Statement)
 statementP = do
   stmtId <- idP <* symbol "."
-  stmtConclusion <- formulaP
+  conclusion <- formulaP
   let wordP = lexemeNamed "premise-word" $ takeWhile1P Nothing isAlpha
       premise = (Right <$> idP) <|> (Left <$> wordP)
-  stmtPremises <- symbol "[" *> sepBy1 premise (symbol ",") <* symbol "]"
-  let stmt' = case stmtPremises of
-                [ Left "axiom" ] -> Right $ Axiom stmtConclusion
+  premises <- symbol "[" *> sepBy1 premise (symbol ",") <* symbol "]"
+  let stmt' = case premises of
+                [ Left "axiom" ] -> Right $ Axiom conclusion
                 ps -> case sequenceA ps of
                         Left txt -> Left $ "unexpected: " <> Text.unpack txt
-                        Right premiseIds -> Right $ Inference stmtConclusion premiseIds
+                        Right premiseIds -> Right $ Inference conclusion premiseIds
   case stmt' of
     Left err -> fail err
     Right stmt -> return (stmtId, stmt)
