@@ -1,5 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-
 module VampireProofCheck.Options
   ( Options(..)
   , Seconds
@@ -41,7 +39,7 @@ optionsParser =
     vampireOutputDir = strOption (long "vampire-output-dir"
                                   <> help "Path to directory where vampire output should be stored"
                                   <> metavar "PATH")
-    proofFile = argument str (help "Path to the proof file. If not specified, read from stdin."
+    proofFile = argument str (help "Path to the proof file. If not specified, the proof is read from stdin."
                               <> metavar "PROOF-FILE")
 
 optionsParserInfo :: ParserInfo Options

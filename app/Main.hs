@@ -9,7 +9,6 @@ module Main where
 import Control.Monad ( forM_,  unless )
 import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.List ( intercalate )
-import System.IO ( hPrint, stderr )
 import System.Exit ( die, exitSuccess )
 
 -- containers
@@ -39,7 +38,6 @@ import VampireProofCheck.Vampire ( runVampire, VampireResult(..) )
 main :: IO ()
 main = do
   opts@Options{..} <- execOptionsParser
-  hPrint stderr opts
   input <- readInput optProofFile
   result <- runExceptT $ do
     proof <- withErrorPrefix "unable to parse input" $ parseProof input
