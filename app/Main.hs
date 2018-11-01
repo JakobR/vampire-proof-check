@@ -6,7 +6,7 @@
 module Main where
 
 -- base
-import Control.Monad ( forM_,  unless )
+import Control.Monad ( forM_ )
 import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.List ( intercalate )
 import System.Exit ( die, exitSuccess )
@@ -81,8 +81,9 @@ checkStatementId Proof{..} checkId =
       return True
     Just (Inference conclusion premiseIds) -> do
       -- Inference may only depend on earlier statements
-      unless (all (< checkId) premiseIds) $
-        throwError $ "inference depends on subsequent formula: " <> show checkId
+      case filter (>= checkId) premiseIds of
+        [] -> return ()
+        xs -> throwError $ "inference may only depends on earlier formulas, but depends on " <> intercalate ", " (show <$> xs)
       -- Look up premises and fail if one doesn't exist
       let
         lookupId :: Id -> Either Id Statement
