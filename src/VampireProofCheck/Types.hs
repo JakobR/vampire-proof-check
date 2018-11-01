@@ -2,7 +2,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module VampireProofChecker.Types
+module VampireProofCheck.Types
   ( Expr(..)
   , Declaration(..)
   , Formula(..)

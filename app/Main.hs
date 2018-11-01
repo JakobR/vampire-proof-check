@@ -27,11 +27,11 @@ import Data.Text ( Text )
 import qualified Data.Text as Text
 import qualified Data.Text.IO
 
--- vampire-proof-checker
-import VampireProofChecker.Options
-import VampireProofChecker.Parser ( parseProof )
-import VampireProofChecker.Types
-import VampireProofChecker.Vampire ( runVampire, VampireResult(..) )
+-- vampire-proof-check
+import VampireProofCheck.Options
+import VampireProofCheck.Parser ( parseProof )
+import VampireProofCheck.Types
+import VampireProofCheck.Vampire ( runVampire, VampireResult(..) )
 
 
 

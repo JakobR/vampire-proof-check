@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module VampireProofChecker.Vampire
+module VampireProofCheck.Vampire
   ( runVampire
   , Seconds
   , VampireResult(..)

@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module VampireProofChecker.List
+module VampireProofCheck.List
   ( findDuplicate
   , hasDuplicates
   ) where

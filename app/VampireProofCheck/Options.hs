@@ -1,6 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module VampireProofChecker.Options
+module VampireProofCheck.Options
   ( Options(..)
   , Seconds
   , execOptionsParser

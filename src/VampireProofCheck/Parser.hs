@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module VampireProofChecker.Parser
+module VampireProofCheck.Parser
   ( parseProof
   ) where
 
@@ -33,9 +33,9 @@ import Control.Applicative.Combinators ( sepBy )
 import Data.Text ( Text )
 import qualified Data.Text as Text
 
--- vampire-proof-checker
-import VampireProofChecker.List ( findDuplicate )
-import VampireProofChecker.Types
+-- vampire-proof-check
+import VampireProofCheck.List ( findDuplicate )
+import VampireProofCheck.Types
 
 
 type Parser = Parsec Void Text

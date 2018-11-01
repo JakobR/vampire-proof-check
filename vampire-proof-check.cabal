@@ -1,5 +1,5 @@
 cabal-version:      2.2
-name:               vampire-proof-checker
+name:               vampire-proof-check
 version:            0.1.0.0
 synopsis:           A simple tool to check proofs with the vampire theorem prover
 -- description:
@@ -21,10 +21,10 @@ common warnings
 
 library
   import:           warnings
-  exposed-modules:  VampireProofChecker.Parser
-                  , VampireProofChecker.Types
-                  , VampireProofChecker.Vampire
-  other-modules:    VampireProofChecker.List
+  exposed-modules:  VampireProofCheck.Parser
+                  , VampireProofCheck.Types
+                  , VampireProofCheck.Vampire
+  other-modules:    VampireProofCheck.List
   build-depends:    base >=4.11 && <4.12
                   , containers
                   , megaparsec
@@ -39,9 +39,9 @@ library
 
 executable vampire-proof-check
   import:           warnings
-  other-modules:    VampireProofChecker.Options
+  other-modules:    VampireProofCheck.Options
   build-depends:    base >=4.11 && <4.12
-                  , vampire-proof-checker
+                  , vampire-proof-check
                   , containers
                   , filepath
                   , mtl
