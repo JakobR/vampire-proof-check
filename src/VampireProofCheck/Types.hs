@@ -40,7 +40,10 @@ newtype Id = Id { unId :: Integer }
   deriving (Eq, Ord)
   deriving newtype (Show)
 
--- | A statement of the proof (axiom or inferred from previous statements)
+-- | A statement of the proof (axiom or inferred from previous statements).
+-- Note that @Inference f []@ states that @f@ is a tautology (and that
+-- vampire should check this), which is different from @Axiom f@ (which
+-- simply asserts @f@ without checking it).
 data Statement
   = Axiom Formula
   | Inference Formula [Id]
