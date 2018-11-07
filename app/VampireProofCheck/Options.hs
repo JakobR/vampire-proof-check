@@ -15,6 +15,7 @@ data Options = Options
   , optVampireTimeout :: Seconds
   , optVampireOutputDir :: Maybe FilePath
   , optProofFile :: Maybe FilePath
+  , optVerbose :: Bool
   }
   deriving (Show)
 
@@ -24,6 +25,7 @@ optionsParser =
           <*> vampireTimeout
           <*> optional vampireOutputDir
           <*> optional proofFile
+          <*> verboseFlag
   where
     vampireExe = strOption (long "vampire-exe"
                             <> help "Path to vampire executable"
@@ -41,6 +43,9 @@ optionsParser =
                                   <> metavar "PATH")
     proofFile = argument str (help "Path to the proof file. If not specified, the proof is read from stdin."
                               <> metavar "PROOF-FILE")
+    verboseFlag = switch (short 'v'
+                          <> long "verbose"
+                          <> help "More output")
 
 optionsParserInfo :: ParserInfo Options
 optionsParserInfo =

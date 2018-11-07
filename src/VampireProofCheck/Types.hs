@@ -23,8 +23,8 @@ import Data.Text ( Text )
 
 -- | SMTLib expressions (Lisp-like S-Expressions)
 data Expr a
-  = Value a
-  | SExpr [Expr a]
+  = Value !a
+  | SExpr ![Expr a]
   deriving (Eq, Show, Functor)
 
 -- | Type declarations of constants, functions, ...
@@ -45,8 +45,8 @@ newtype Id = Id { unId :: Integer }
 -- vampire should check this), which is different from @Axiom f@ (which
 -- simply asserts @f@ without checking it).
 data Statement
-  = Axiom Formula
-  | Inference Formula [Id]
+  = Axiom !Formula
+  | Inference !Formula ![Id]
   deriving (Show)
 
 isAxiom :: Statement -> Bool
@@ -62,7 +62,7 @@ stmtConclusion (Axiom f) = f
 stmtConclusion (Inference f _) = f
 
 data Proof = Proof
-  { proofDeclarations :: [Declaration]
-  , proofStatements :: Map Id Statement
+  { proofDeclarations :: ![Declaration]
+  , proofStatements :: !(Map Id Statement)
   }
   deriving (Show)

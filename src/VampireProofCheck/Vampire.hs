@@ -1,9 +1,10 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module VampireProofCheck.Vampire
   ( runVampire
   , Seconds
   , VampireResult(..)
+  , VampireStats(..)
   ) where
 
 -- base
@@ -11,18 +12,30 @@ import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.List ( isPrefixOf )
 import System.Exit ( ExitCode(..) )
 
+-- deepseq
+import Control.DeepSeq ( deepseq )
+
 -- process
 import System.Process ( readProcessWithExitCode )
 
+-- time
+import Data.Time.Clock ( NominalDiffTime, diffUTCTime )
+import Data.Time.Clock.System ( getSystemTime, systemToUTCTime )
 
+
+-- NOTE: Maybe we should use NominalDiffTime instead of a naked integer?
 type Seconds = Int
+
+data VampireStats = VampireStats
+  { vsRuntime :: !NominalDiffTime  -- ^ how long vampire was running
+  }
 
 runVampire
   :: MonadIO m
   => FilePath  -- ^ path to vampire executable
   -> Seconds   -- ^ vampire timeout (0 means no limit)
   -> String    -- ^ the input to pass to vampire
-  -> m (VampireResult, String, String)
+  -> m (VampireResult, VampireStats, String, String)
 runVampire vampireExe timeoutSecs input = do
   let options = [ "--input_syntax", "smtlib2"
                 -- , "--proof", "off"
@@ -30,9 +43,16 @@ runVampire vampireExe timeoutSecs input = do
                 -- , "--mode", "portfolio"
                 -- , "--statistics", "none"
                 , "--time_limit", show timeoutSecs]
-  (exitCode, output, err) <- liftIO $ readProcessWithExitCode vampireExe options input
-  let vampireResult = parseVampireOutput exitCode output
-  return $ (vampireResult, output, err)
+
+  t1 <- (vampireExe, options, input) `deepseq` liftIO getSystemTime
+  r@(exitCode, output, err) <- liftIO $ readProcessWithExitCode vampireExe options input
+  t2 <- r `deepseq` liftIO getSystemTime
+
+  let
+    vsRuntime = systemToUTCTime t2 `diffUTCTime` systemToUTCTime t1
+    vampireResult = parseVampireOutput exitCode output
+
+  return $ (vampireResult, VampireStats{..}, output, err)
 
 parseVampireOutput :: ExitCode -> String -> VampireResult
 parseVampireOutput exitCode output =
@@ -54,5 +74,5 @@ data VampireResult
   = Satisfiable
   | Refutation
   | Timeout
-  | Error String
+  | Error !String
   deriving (Eq, Show)
