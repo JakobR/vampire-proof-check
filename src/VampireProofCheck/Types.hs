@@ -48,6 +48,7 @@ data Statement
   = Axiom !Formula
   | Inference !Formula ![Id]
   deriving (Show)
+-- TODO: Add a way to annotate each inference with additional vampire options?
 
 isAxiom :: Statement -> Bool
 isAxiom (Axiom _) = True

@@ -34,15 +34,13 @@ runVampire
   :: MonadIO m
   => FilePath  -- ^ path to vampire executable
   -> Seconds   -- ^ vampire timeout (0 means no limit)
+  -> [String]  -- ^ additional command-line options for vampire
   -> String    -- ^ the input to pass to vampire
   -> m (VampireResult, VampireStats, String, String)
-runVampire vampireExe timeoutSecs input = do
+runVampire vampireExe timeoutSecs additionalOptions input = do
   let options = [ "--input_syntax", "smtlib2"
-                -- , "--proof", "off"
-                , "--avatar", "off"
-                -- , "--mode", "portfolio"
-                -- , "--statistics", "none"
-                , "--time_limit", show timeoutSecs]
+                , "--time_limit", show timeoutSecs
+                ] ++ additionalOptions
 
   t1 <- (vampireExe, options, input) `deepseq` liftIO getSystemTime
   r@(exitCode, output, err) <- liftIO $ readProcessWithExitCode vampireExe options input

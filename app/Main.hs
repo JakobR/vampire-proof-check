@@ -6,10 +6,11 @@
 module Main where
 
 -- base
-import Control.Monad ( forM_, when )
+import Control.Monad ( forM, forM_, when )
 import Control.Monad.IO.Class ( MonadIO(..) )
 import Data.List ( intercalate )
 import System.Exit ( die, exitSuccess )
+import System.IO ( hSetBuffering, stdout, BufferMode(..) )
 
 -- containers
 import qualified Data.Map.Strict as Map
@@ -39,17 +40,17 @@ import VampireProofCheck.Vampire ( runVampire, VampireResult(..), VampireStats(.
 
 main :: IO ()
 main = do
+  hSetBuffering stdout NoBuffering
   opts@Options{..} <- execOptionsParser
   input <- readInput optProofFile
   result <- runExceptT $ do
     proof <- withErrorPrefix "unable to parse input" $ parseProof input
-    flip runReaderT opts $ checkProof proof
-    return $ length . filter isInference . map snd . Map.toList . proofStatements $ proof
+    runReaderT (checkProof proof) opts
   case result of
     Left err ->
       die $ "Error: " <> err
     Right numInferences -> do
-      putStrLn $ "Checked " <> show numInferences <> " inferences. Proof is correct!"
+      putStrLn $ "Checked " <> showQuantity numInferences "inference" <> ". Proof is correct!"
       exitSuccess
 
 
@@ -59,12 +60,19 @@ readInput Nothing = Data.Text.IO.getContents
 readInput (Just file) = Data.Text.IO.readFile file
 
 
+showQuantity :: (Eq a, Num a, Show a) => a -> String -> String
+showQuantity 1 name = "1 " <> name
+showQuantity n name = show n <> " " <> name <> "s"
+
+
 checkProof
   :: (MonadIO m, MonadReader Options m, MonadError String m)
   => Proof
-  -> m ()
-checkProof proof@Proof{..} =
-  forM_ (Map.keys proofStatements) $ \stmtId -> do
+  -> m Int
+checkProof proof@Proof{..} = do
+  idsToCheck <- maybe (Map.keys proofStatements) (:[]) <$> asks optCheckOnlyId
+
+  checkedInferences <- forM idsToCheck $ \stmtId -> do
     verbose <- asks optVerbose
     when verbose $ liftIO $
       putStr $ "Checking statement " <> showIdPadded stmtId <> "... "
@@ -77,7 +85,9 @@ checkProof proof@Proof{..} =
 
     case result of
       False -> throwError $ "statement " <> show stmtId <> " does not hold!"
-      True -> return ()
+      True -> return $ maybe False isInference (Map.lookup stmtId proofStatements)
+
+  return . length . filter (==True) $ checkedInferences
 
   where
     maxIdLen = maximumDef 0 (length . show <$> Map.keys proofStatements)
@@ -137,12 +147,14 @@ checkImplication outputName decls premises conclusion = do
             <> [conclusionAssertion]
     vampireInput = intercalate "\n" (showExpr <$> exprs)
     outputBasename = (</> ("inference_" ++ outputName)) <$> optVampireOutputDir
+    -- TODO: should we allow some mechanism to pass options with spaces to vampire?
+    additionalOptions = words optVampireOptions
 
   forM_ outputBasename $ \basename ->
     liftIO $ writeFile (basename <.> ".in.smt2") vampireInput
 
   (vampireResult, vampireStats, vampireOutput, vampireError) <-
-    runVampire optVampireExe optVampireTimeout vampireInput
+    runVampire optVampireExe optVampireTimeout additionalOptions vampireInput
 
   forM_ outputBasename $ \basename -> do
     liftIO $ writeFile (basename <.> ".vout") vampireOutput
