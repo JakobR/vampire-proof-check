@@ -31,6 +31,7 @@ import qualified Data.Text as Text
 import qualified Data.Text.IO
 
 -- vampire-proof-check
+import qualified Data.Range as Range
 import VampireProofCheck.Options
 import VampireProofCheck.Parser ( parseProof )
 import VampireProofCheck.Types
@@ -70,7 +71,8 @@ checkProof
   => Proof
   -> m Int
 checkProof proof@Proof{..} = do
-  idsToCheck <- maybe (Map.keys proofStatements) (:[]) <$> asks optCheckOnlyId
+  checkId <- maybe (const True) (flip Range.member) <$> asks optCheckOnlyIds
+  let idsToCheck = filter checkId (Map.keys proofStatements)
 
   checkedInferences <- forM idsToCheck $ \stmtId -> do
     verbose <- asks optVerbose

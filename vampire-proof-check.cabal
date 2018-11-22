@@ -21,7 +21,8 @@ common warnings
 
 library
   import:           warnings
-  exposed-modules:  VampireProofCheck.Parser
+  exposed-modules:  Data.Range
+                  , VampireProofCheck.Parser
                   , VampireProofCheck.Types
                   , VampireProofCheck.Vampire
   other-modules:    VampireProofCheck.List

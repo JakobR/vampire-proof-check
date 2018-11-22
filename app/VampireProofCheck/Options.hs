@@ -8,6 +8,7 @@ module VampireProofCheck.Options
 import Options.Applicative
 
 -- vampire-proof-check
+import Data.Range ( parseIntegerRange', Range(..) )
 import VampireProofCheck.Types ( Id(..) )
 
 
@@ -18,9 +19,9 @@ data Options = Options
   , optVampireTimeout :: Seconds
   , optVampireOptions :: String
   , optVampireOutputDir :: Maybe FilePath
-  , optProofFile :: Maybe FilePath
-  , optCheckOnlyId :: Maybe Id
+  , optCheckOnlyIds :: Maybe (Range Id)
   , optVerbose :: Bool
+  , optProofFile :: Maybe FilePath
   }
   deriving (Show)
 
@@ -30,9 +31,9 @@ optionsParser =
           <*> vampireTimeout
           <*> vampireOptions
           <*> optional vampireOutputDir
-          <*> optional proofFile
-          <*> optional checkOnlyId
+          <*> optional checkOnlyIds
           <*> verboseFlag
+          <*> optional proofFile
   where
     vampireExe = strOption (short 'x'
                             <> long "vampire-exe"
@@ -55,14 +56,15 @@ optionsParser =
     vampireOutputDir = strOption (long "vampire-output-dir"
                                   <> help "Path to directory where vampire output should be stored"
                                   <> metavar "PATH")
-    proofFile = argument str (help "Path to the proof file. If not specified, the proof is read from stdin."
-                              <> metavar "PROOF-FILE")
-    checkOnlyId = Id <$> option auto (long "only"
-                                      <> help "Only check the statement with the given id"
-                                      <> metavar "ID")
+    checkOnlyIds = option idRange (long "only"
+                                   <> help ("Only check the statements in the given range of ids "
+                                            ++ "(for example: 1,2,5-10)")
+                                   <> metavar "ID")
     verboseFlag = switch (short 'v'
                           <> long "verbose"
                           <> help "More output")
+    proofFile = argument str (help "Path to the proof file. If not specified, the proof is read from stdin."
+                              <> metavar "PROOF-FILE")
 
 optionsParserInfo :: ParserInfo Options
 optionsParserInfo =
@@ -73,3 +75,6 @@ optionsParserInfo =
 
 execOptionsParser :: IO Options
 execOptionsParser = execParser optionsParserInfo
+
+idRange :: ReadM (Range Id)
+idRange = eitherReader (parseIntegerRange' Id)
