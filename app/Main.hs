@@ -3,17 +3,23 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Main where
+module Main
+  ( main
+  ) where
 
 -- base
 import Control.Monad ( forM, forM_, when )
 import Control.Monad.IO.Class ( MonadIO(..) )
+import Data.Char ( isSpace )
 import Data.List ( intercalate )
 import System.Exit ( die, exitSuccess )
 import System.IO ( hSetBuffering, stdout, BufferMode(..) )
 
 -- containers
 import qualified Data.Map.Strict as Map
+
+-- directory
+import System.Directory ( removeFile )
 
 -- filepath
 import System.FilePath.Posix ( (</>), (<.>) )
@@ -152,15 +158,15 @@ checkImplication outputName decls premises conclusion = do
     -- TODO: should we allow some mechanism to pass options with spaces to vampire?
     additionalOptions = words optVampireOptions
 
-  forM_ outputBasename $ \basename ->
-    liftIO $ writeFile (basename <.> ".in.smt2") vampireInput
+  forM_ outputBasename $ \basename -> liftIO $
+    writeFile (basename <.> ".in.smt2") vampireInput
 
   (vampireResult, vampireStats, vampireOutput, vampireError) <-
     runVampire optVampireExe optVampireTimeout additionalOptions vampireInput
 
-  forM_ outputBasename $ \basename -> do
-    liftIO $ writeFile (basename <.> ".vout") vampireOutput
-    liftIO $ writeFile (basename <.> ".verr") vampireError
+  forM_ outputBasename $ \basename -> liftIO $ do
+    writeFile (basename <.> ".vout") vampireOutput
+    writeFileUnlessEmpty (basename <.> ".verr") vampireError
 
   case vampireResult of
     Satisfiable -> return (False, vampireStats)
@@ -181,3 +187,12 @@ withErrorPrefix
   -> m a
 withErrorPrefix prefix m =
   m `catchError` \err -> throwError (prefix <> ": " <> err)
+
+
+-- | If content isn't empty, write it to the given file, otherwise delete the file.
+writeFileUnlessEmpty :: FilePath -> String -> IO ()
+writeFileUnlessEmpty file content = if isEmpty content
+                                    then removeFile file
+                                    else writeFile file content
+  where
+    isEmpty = all isSpace
