@@ -1,0 +1,1 @@
+* TODO Add some examples of proofs to show the syntax
