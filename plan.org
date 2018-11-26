@@ -1,1 +1,5 @@
 * TODO Add some examples of proofs to show the syntax
+* TODO Should we add a way to annotate each inference with additional vampire options?
+  Probably not, since the ultimate goal is to have vampire find the complete proof by itself.
+* TODO Should we allow some mechanism to pass options with spaces to vampire?
+  Currently we simply split the argument string with the function ~words~.

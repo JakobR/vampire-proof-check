@@ -156,7 +156,6 @@ checkImplication outputName decls premises conclusion = do
             <> [conclusionAssertion]
     vampireInput = intercalate "\n" (showExpr <$> exprs)
     outputBasename = (</> ("inference_" ++ outputName)) <$> optVampireOutputDir
-    -- TODO: should we allow some mechanism to pass options with spaces to vampire?
     additionalOptions = words optVampireOptions
 
   forM_ outputBasename $ \basename -> liftIO $
