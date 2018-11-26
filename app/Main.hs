@@ -14,6 +14,7 @@ import Data.Char ( isSpace )
 import Data.List ( intercalate )
 import System.Exit ( die, exitSuccess )
 import System.IO ( hSetBuffering, stdout, BufferMode(..) )
+import System.IO.Error ( catchIOError, ioError, isDoesNotExistError )
 
 -- containers
 import qualified Data.Map.Strict as Map
@@ -193,6 +194,8 @@ withErrorPrefix prefix m =
 writeFileUnlessEmpty :: FilePath -> String -> IO ()
 writeFileUnlessEmpty file content = if isEmpty content
                                     then removeFile file
+                                         `catchIOError`
+                                         (\e -> if isDoesNotExistError e then return () else ioError e)
                                     else writeFile file content
   where
     isEmpty = all isSpace
