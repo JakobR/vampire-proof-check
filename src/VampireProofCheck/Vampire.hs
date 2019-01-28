@@ -1,17 +1,23 @@
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeApplications #-}
 
 module VampireProofCheck.Vampire
   ( runVampire
-  , Seconds
+  , MonadVampire(..)
   , Result(..)
   , UnknownReason(..)
   , VampireStats(..)
   ) where
 
 -- base
-import Control.Monad.IO.Class (MonadIO(..))
+import Control.Monad (when)
 import Data.List (isPrefixOf)
 import System.Exit (ExitCode(..))
+import System.IO (stderr, hPutStrLn)
+
+-- clock
+import System.Clock (getTime, Clock(Monotonic), diffTimeSpec, toNanoSecs)
 
 -- deepseq
 import Control.DeepSeq (deepseq)
@@ -23,12 +29,8 @@ import System.Process (readProcessWithExitCode)
 import Safe (headDef)
 
 -- time
-import Data.Time.Clock (NominalDiffTime, diffUTCTime)
-import Data.Time.Clock.System (getSystemTime, systemToUTCTime)
+import Data.Time.Clock (diffTimeToPicoseconds, picosecondsToDiffTime, DiffTime)
 
-
--- NOTE: Maybe we should use NominalDiffTime instead of a naked integer?
-type Seconds = Int
 
 data Result
   = Satisfiable
@@ -43,28 +45,61 @@ data UnknownReason
   deriving (Eq, Show)
 
 data VampireStats = VampireStats
-  { vsRuntime :: !NominalDiffTime  -- ^ how long vampire was running
+  { vsRuntime :: !DiffTime  -- ^ how long vampire was running
   }
 
 
-runVampire
-  :: MonadIO m
-  => FilePath  -- ^ path to vampire executable
-  -> Seconds   -- ^ vampire timeout (0 means no limit)
-  -> [String]  -- ^ additional command-line options for vampire
-  -> String    -- ^ the input to pass to vampire
-  -> m (Result, VampireStats, String, String)
-runVampire vampireExe timeoutSecs additionalOptions input = do
-  let options = [ "--input_syntax", "smtlib2"
-                , "--time_limit", show timeoutSecs
-                ] ++ additionalOptions
+class Monad m => MonadVampire m where
+  runVampire'
+    :: Bool            -- ^ whether to print debug output to stderr
+    -> FilePath        -- ^ path to vampire executable
+    -> Maybe DiffTime  -- ^ vampire timeout, if any
+    -> [String]        -- ^ additional command-line options for vampire
+    -> String          -- ^ the input to pass to vampire
+    -> m (Result, VampireStats, String, String)
 
-  t1 <- (vampireExe, options, input) `deepseq` liftIO getSystemTime
-  r@(exitCode, output, err) <- liftIO $ readProcessWithExitCode vampireExe options input
-  t2 <- r `deepseq` liftIO getSystemTime
+
+instance MonadVampire IO where
+  runVampire' = runVampireIO
+  {-# INLINABLE runVampire' #-}
+
+
+runVampire
+  :: MonadVampire m
+  => FilePath        -- ^ path to vampire executable
+  -> Maybe DiffTime  -- ^ vampire timeout, if any
+  -> [String]        -- ^ additional command-line options for vampire
+  -> String          -- ^ the input to pass to vampire
+  -> m (Result, VampireStats, String, String)
+runVampire = runVampire' False
+{-# INLINABLE runVampire #-}
+
+
+runVampireIO
+  :: Bool
+  -> FilePath
+  -> Maybe DiffTime
+  -> [String]
+  -> String
+  -> IO (Result, VampireStats, String, String)
+runVampireIO debug vampireExe timeout additionalOptions input = do
+
+  let diffTimeToSeconds = (`div` 1_000_000_000_000) . diffTimeToPicoseconds
+      mkTimeoutOptions t = [ "--time_limit", show (diffTimeToSeconds t) ]
+
+  let options = [ "--input_syntax", "smtlib2" ]
+                ++ maybe [] mkTimeoutOptions timeout
+                ++ additionalOptions
+
+  when debug $
+    hPutStrLn stderr ("Running vampire with: " <> show options)
+
+  t1 <- (vampireExe, options, input) `deepseq` getTime Monotonic
+  r@(exitCode, output, err) <- readProcessWithExitCode vampireExe options input
+  t2 <- r `deepseq` getTime Monotonic
 
   let
-    vsRuntime = systemToUTCTime t2 `diffUTCTime` systemToUTCTime t1
+    vsRuntime = picosecondsToDiffTime . (*1000) . toNanoSecs $ t2 `diffTimeSpec` t1
     vampireResult = parseVampireOutput exitCode output
 
   return $ (vampireResult, VampireStats{..}, output, err)

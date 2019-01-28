@@ -1,22 +1,22 @@
 module VampireProofCheck.Options
   ( Options(..)
-  , Seconds
   , execOptionsParser
   ) where
 
 -- optparse-applicative
 import Options.Applicative
 
+-- time
+import Data.Time.Clock (DiffTime)
+
 -- vampire-proof-check
 import Data.Range (parseIntegerRange', Range(..))
 import VampireProofCheck.Types (Id(..))
 
 
-type Seconds = Int
-
 data Options = Options
   { optVampireExe :: FilePath
-  , optVampireTimeout :: Seconds
+  , optVampireTimeout :: Maybe DiffTime
   , optVampireOptions :: String
   , optVampireOutputDir :: Maybe FilePath
   , optCheckOnlyIds :: Maybe (Range Id)
@@ -32,7 +32,7 @@ optionsParser :: Parser Options
 optionsParser =
   pure Options
   <*> vampireExe
-  <*> vampireTimeout
+  <*> optional vampireTimeout
   <*> vampireOptions
   <*> optional vampireOutputDir
   <*> optional checkOnlyIds
@@ -53,12 +53,10 @@ optionsParser =
       <> metavar "PATH"
 
     vampireTimeout =
-      option auto $
+      option (fromInteger <$> auto) $
       short 't'
       <> long "vampire-timeout"
-      <> help "Timeout for vampire in seconds, 0 means no limit"
-      <> value 5
-      <> showDefault
+      <> help "Timeout for vampire in seconds"
       <> metavar "SECONDS"
 
     vampireOptions =
@@ -67,7 +65,6 @@ optionsParser =
       <> long "vampire-options"
       <> help "Additional options that should be passed to vampire"
       <> value ""
-      <> showDefault
       <> metavar "OPTIONS"
 
     vampireOutputDir =

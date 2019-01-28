@@ -197,8 +197,8 @@ checkImplication outputName decls premises conclusion = do
   forM_ outputBasename $ \basename -> liftIO $
     writeFile (basename <.> ".in.smt2") vampireInput
 
-  (vampireResult, vampireStats, vampireOutput, vampireError) <-
-    runVampire optVampireExe optVampireTimeout additionalOptions vampireInput
+  (vampireResult, vampireStats, vampireOutput, vampireError) <- liftIO $
+    runVampire' optDebug optVampireExe optVampireTimeout additionalOptions vampireInput
 
   forM_ outputBasename $ \basename -> liftIO $ do
     writeFile (basename <.> ".vout") vampireOutput
