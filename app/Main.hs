@@ -43,7 +43,7 @@ import qualified Data.Range as Range
 import VampireProofCheck.Options
 import VampireProofCheck.Parser (parseProof)
 import VampireProofCheck.Types
-import VampireProofCheck.Vampire (runVampire, VampireResult(..), VampireStats(..))
+import VampireProofCheck.Vampire
 
 
 
@@ -111,10 +111,11 @@ checkProof proof@Proof{..} = do
           return ()  -- success
         Right False ->
           throwError $ "statement " <> show stmtId <> " does not hold!"
-        Left CheckTimeout ->
-          throwError $ "while checking statement " <> show stmtId <> ": timeout"
-        Left (CheckError err) ->
-          throwError $ "while checking statement " <> show stmtId <> ": vampire: " <> err
+        Left u ->
+          let msg = case u of Timeout -> "timeout"
+                              IncompleteStrategy -> "incomplete strategy"
+                              Error err -> "vampire: " <> err
+          in throwError $ "while checking statement " <> show stmtId <> ": " <> msg
 
     return (stmtId, result)
 
@@ -132,8 +133,10 @@ checkProof proof@Proof{..} = do
     isSuccess (Left _) = False
     showResult (Right True) = "✓"
     showResult (Right False) = "✗"
-    showResult (Left CheckTimeout) = "✗ [timeout]"
-    showResult (Left (CheckError _)) = "✗ [error]"
+    showResult (Left u) = let reason = case u of Timeout -> "timeout"
+                                                 IncompleteStrategy -> "incomplete strategy"
+                                                 Error _ -> "error"
+                          in "✗ [" <> reason <> "]"
     showStats VampireStats{..} = " (vampire: " <> show vsRuntime <> ")"
 
 
@@ -141,7 +144,7 @@ checkStatementId
   :: (MonadIO m, MonadReader Options m, MonadError String m)
   => Proof -- ^ the proof which is being checked
   -> Id    -- ^ Id of the statement that should be checked
-  -> m (Either CheckError Bool, Maybe VampireStats)
+  -> m (Either UnknownReason Bool, Maybe VampireStats)
 checkStatementId Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
@@ -170,12 +173,12 @@ checkStatementId Proof{..} checkId =
 
 
 checkImplication
-  :: (MonadIO m, MonadReader Options m, MonadError String m)
+  :: (MonadIO m, MonadReader Options m)
   => String         -- ^ name for output file
   -> [Declaration]  -- ^ additional declarations
   -> [Formula]      -- ^ the premises
   -> Formula        -- ^ the conclusion
-  -> m (Either CheckError Bool, VampireStats)
+  -> m (Either UnknownReason Bool, VampireStats)
 checkImplication outputName decls premises conclusion = do
   Options{..} <- ask
   let
@@ -204,16 +207,8 @@ checkImplication outputName decls premises conclusion = do
   let checkResult = case vampireResult of
                       Satisfiable -> Right False
                       Refutation -> Right True
-                      Timeout -> Left CheckTimeout
-                      Error err -> Left (CheckError err)
+                      Unknown u -> Left u
   return (checkResult, vampireStats)
-  -- case vampireResult of
-  --   Satisfiable -> return (False, vampireStats)
-  --   Refutation -> return (True, vampireStats)
-  --   Timeout -> throwError "timeout"
-  --   Error err -> throwError $ "vampire: " <> err
-
-data CheckError = CheckTimeout | CheckError !String
 
 
 showExpr :: Expr Text -> String

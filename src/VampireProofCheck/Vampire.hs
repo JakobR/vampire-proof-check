@@ -3,7 +3,8 @@
 module VampireProofCheck.Vampire
   ( runVampire
   , Seconds
-  , VampireResult(..)
+  , Result(..)
+  , UnknownReason(..)
   , VampireStats(..)
   ) where
 
@@ -29,10 +30,15 @@ import Data.Time.Clock.System (getSystemTime, systemToUTCTime)
 -- NOTE: Maybe we should use NominalDiffTime instead of a naked integer?
 type Seconds = Int
 
-data VampireResult
+data Result
   = Satisfiable
   | Refutation
-  | Timeout
+  | Unknown !UnknownReason
+  deriving (Eq, Show)
+
+data UnknownReason
+  = Timeout
+  | IncompleteStrategy
   | Error !String
   deriving (Eq, Show)
 
@@ -47,7 +53,7 @@ runVampire
   -> Seconds   -- ^ vampire timeout (0 means no limit)
   -> [String]  -- ^ additional command-line options for vampire
   -> String    -- ^ the input to pass to vampire
-  -> m (VampireResult, VampireStats, String, String)
+  -> m (Result, VampireStats, String, String)
 runVampire vampireExe timeoutSecs additionalOptions input = do
   let options = [ "--input_syntax", "smtlib2"
                 , "--time_limit", show timeoutSecs
@@ -64,7 +70,7 @@ runVampire vampireExe timeoutSecs additionalOptions input = do
   return $ (vampireResult, VampireStats{..}, output, err)
 
 
-parseVampireOutput :: ExitCode -> String -> VampireResult
+parseVampireOutput :: ExitCode -> String -> Result
 parseVampireOutput exitCode output =
   case (exitCode, primaryReasons, secondaryReasons) of
 
@@ -78,21 +84,19 @@ parseVampireOutput exitCode output =
       Satisfiable
 
     (_, ["Timeout"], _) ->
-      Timeout
+      Unknown Timeout
 
     (_, [], ["Time limit"]) ->
-      Timeout
+      Unknown Timeout
 
     (_, [], ["Refutation not found, incomplete strategy"]) ->
-      Timeout
-      -- TODO: instead of Timeout, maybe we should use "Unknown":
-      -- data VampireResult = Refutation | Satisfiable | Unknown !UnknownReason
-      -- data UnknownReason = Timeout | IncompleteStrategy | Error !String
+      Unknown IncompleteStrategy
 
     (_, _, _) ->
-      Error ("ExitCode = " <> show exitCode
-             <> "; Unknown termination reason: " <> show allReasons
-             <> "\nOutput:\n" <> output)
+      let msg = "ExitCode = " <> show exitCode
+                <> "; Unknown termination reason: " <> show allReasons
+                <> "\nOutput:\n" <> output
+      in Unknown (Error msg)
 
   where
     primaryReasons = headDef "<none>" . words <$> extractTerminationReasons "% SZS status " output
