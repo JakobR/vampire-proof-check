@@ -8,8 +8,8 @@ module VampireProofCheck.Options
 import Options.Applicative
 
 -- vampire-proof-check
-import Data.Range ( parseIntegerRange', Range(..) )
-import VampireProofCheck.Types ( Id(..) )
+import Data.Range (parseIntegerRange', Range(..))
+import VampireProofCheck.Types (Id(..))
 
 
 type Seconds = Int
@@ -20,20 +20,25 @@ data Options = Options
   , optVampireOptions :: String
   , optVampireOutputDir :: Maybe FilePath
   , optCheckOnlyIds :: Maybe (Range Id)
+  , optContinueOnError :: Bool
   , optVerbose :: Bool
   , optProofFile :: Maybe FilePath
+  , optDebug :: Bool
   }
   deriving (Show)
 
 optionsParser :: Parser Options
 optionsParser =
-  Options <$> vampireExe
-          <*> vampireTimeout
-          <*> vampireOptions
-          <*> optional vampireOutputDir
-          <*> optional checkOnlyIds
-          <*> verboseFlag
-          <*> optional proofFile
+  pure Options
+  <*> vampireExe
+  <*> vampireTimeout
+  <*> vampireOptions
+  <*> optional vampireOutputDir
+  <*> optional checkOnlyIds
+  <*> continueOnErrorFlag
+  <*> verboseFlag
+  <*> optional proofFile
+  <*> debugFlag
   where
     vampireExe = strOption (short 'x'
                             <> long "vampire-exe"
@@ -60,11 +65,22 @@ optionsParser =
                                    <> help ("Only check the statements in the given range of ids "
                                             ++ "(for example: 1,2,5-10)")
                                    <> metavar "ID")
+
+    continueOnErrorFlag
+      = switch
+        (short 'e'
+         <> long "continue-on-error"
+         <> help "When a proof step fails, continue checking the subsequent inferences.")
+
     verboseFlag = switch (short 'v'
                           <> long "verbose"
                           <> help "More output")
     proofFile = argument str (help "Path to the proof file. If not specified, the proof is read from stdin."
                               <> metavar "PROOF-FILE")
+
+    debugFlag =
+      switch (long "debug"
+              <> help "Print some debug output")
 
 optionsParserInfo :: ParserInfo Options
 optionsParserInfo =

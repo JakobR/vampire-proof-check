@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -8,41 +9,41 @@ module Main
   ) where
 
 -- base
-import Control.Monad ( forM, forM_, when )
-import Control.Monad.IO.Class ( MonadIO(..) )
-import Data.Char ( isSpace )
-import Data.List ( intercalate )
-import System.Exit ( die, exitSuccess )
-import System.IO ( hSetBuffering, stdout, BufferMode(..) )
-import System.IO.Error ( catchIOError, ioError, isDoesNotExistError )
+import Control.Monad (forM, forM_, when, unless)
+import Control.Monad.IO.Class (MonadIO(..))
+import Data.Char (isSpace)
+import Data.List (intercalate)
+import System.Exit (die, exitSuccess)
+import System.IO (hPrint, hSetBuffering, stderr, stdout, BufferMode(..))
+import System.IO.Error (catchIOError, ioError, isDoesNotExistError)
 
 -- containers
 import qualified Data.Map.Strict as Map
 
 -- directory
-import System.Directory ( removeFile )
+import System.Directory (createDirectoryIfMissing, removeFile)
 
 -- filepath
-import System.FilePath.Posix ( (</>), (<.>) )
+import System.FilePath.Posix ((</>), (<.>))
 
 -- mtl
-import Control.Monad.Except ( runExceptT,  MonadError(..) )
-import Control.Monad.Reader ( asks, runReaderT,  MonadReader(..) )
+import Control.Monad.Except (runExceptT,  MonadError(..))
+import Control.Monad.Reader (asks, runReaderT,  MonadReader(..))
 
 -- safe
-import Safe ( maximumDef )
+import Safe (maximumDef)
 
 -- text
-import Data.Text ( Text )
+import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO
 
 -- vampire-proof-check
 import qualified Data.Range as Range
 import VampireProofCheck.Options
-import VampireProofCheck.Parser ( parseProof )
+import VampireProofCheck.Parser (parseProof)
 import VampireProofCheck.Types
-import VampireProofCheck.Vampire ( runVampire, VampireResult(..), VampireStats(..) )
+import VampireProofCheck.Vampire (runVampire, VampireResult(..), VampireStats(..))
 
 
 
@@ -50,10 +51,17 @@ main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
   opts@Options{..} <- execOptionsParser
+  when optDebug $ hPrint stderr opts
   input <- readInput optProofFile
+
   result <- runExceptT $ do
-    proof <- withErrorPrefix "unable to parse input" $ parseProof input
+    proof <- withErrorPrefix "unable to parse input" $ parseProof optProofFile input
+
+    -- Create output directory if it doesn't exist already
+    whenJust optVampireOutputDir (liftIO . createDirectoryIfMissing True)
+
     runReaderT (checkProof proof) opts
+
   case result of
     Left err ->
       die $ "Error: " <> err
@@ -66,6 +74,10 @@ main = do
 readInput :: Maybe FilePath -> IO Text
 readInput Nothing = Data.Text.IO.getContents
 readInput (Just file) = Data.Text.IO.readFile file
+
+
+whenJust :: Applicative f => Maybe a -> (a -> f ()) -> f ()
+whenJust = flip $ maybe (pure ())
 
 
 showQuantity :: (Eq a, Num a, Show a) => a -> String -> String
@@ -81,26 +93,47 @@ checkProof proof@Proof{..} = do
   checkId <- maybe (const True) (flip Range.member) <$> asks optCheckOnlyIds
   let idsToCheck = filter checkId (Map.keys proofStatements)
 
-  checkedInferences <- forM idsToCheck $ \stmtId -> do
+  checkedStatements <- forM idsToCheck $ \stmtId -> do
     verbose <- asks optVerbose
     when verbose $ liftIO $
       putStr $ "Checking statement " <> showIdPadded stmtId <> "... "
 
-    (result, mstats) <-
+    (result, mVampire) <-
       withErrorPrefix ("while checking statement " <> show stmtId) $ checkStatementId proof stmtId
 
     when verbose $ liftIO $
-      putStrLn $ (if result then "✓" else "✗") <> maybe "" showStats mstats
+      putStrLn $ showResult result <> maybe "" showStats mVampire
 
-    case result of
-      False -> throwError $ "statement " <> show stmtId <> " does not hold!"
-      True -> return $ maybe False isInference (Map.lookup stmtId proofStatements)
+    continueOnError <- asks optContinueOnError
+    unless continueOnError $
+      case result of
+        Right True ->
+          return ()  -- success
+        Right False ->
+          throwError $ "statement " <> show stmtId <> " does not hold!"
+        Left CheckTimeout ->
+          throwError $ "while checking statement " <> show stmtId <> ": timeout"
+        Left (CheckError err) ->
+          throwError $ "while checking statement " <> show stmtId <> ": vampire: " <> err
 
-  return . length . filter (==True) $ checkedInferences
+    return (stmtId, result)
+
+  let falseStatements = fst <$> filter (not . isSuccess . snd) checkedStatements
+      idIsInference = maybe False isInference . (proofStatements Map.!?)
+      numInferences = length $ filter (idIsInference . fst) checkedStatements
+  case falseStatements of
+    [] -> return numInferences
+    _ -> throwError $ "statements do not hold: " <> show falseStatements
 
   where
     maxIdLen = maximumDef 0 (length . show <$> Map.keys proofStatements)
     showIdPadded stmtId = let s = show stmtId in replicate (maxIdLen - length s) ' ' <> s
+    isSuccess (Right b) = b
+    isSuccess (Left _) = False
+    showResult (Right True) = "✓"
+    showResult (Right False) = "✗"
+    showResult (Left CheckTimeout) = "✗ [timeout]"
+    showResult (Left (CheckError _)) = "✗ [error]"
     showStats VampireStats{..} = " (vampire: " <> show vsRuntime <> ")"
 
 
@@ -108,14 +141,14 @@ checkStatementId
   :: (MonadIO m, MonadReader Options m, MonadError String m)
   => Proof -- ^ the proof which is being checked
   -> Id    -- ^ Id of the statement that should be checked
-  -> m (Bool, Maybe VampireStats)
+  -> m (Either CheckError Bool, Maybe VampireStats)
 checkStatementId Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
       throwError $ "id doesn't appear in proof: " <> show checkId
     Just (Axiom _) ->
       -- Nothing to check for axioms
-      return (True, Nothing)
+      return (Right True, Nothing)
     Just (Inference conclusion premiseIds) -> do
       -- Inference may only depend on earlier statements
       case filter (>= checkId) premiseIds of
@@ -142,7 +175,7 @@ checkImplication
   -> [Declaration]  -- ^ additional declarations
   -> [Formula]      -- ^ the premises
   -> Formula        -- ^ the conclusion
-  -> m (Bool, VampireStats)
+  -> m (Either CheckError Bool, VampireStats)
 checkImplication outputName decls premises conclusion = do
   Options{..} <- ask
   let
@@ -168,11 +201,19 @@ checkImplication outputName decls premises conclusion = do
     writeFile (basename <.> ".vout") vampireOutput
     writeFileUnlessEmpty (basename <.> ".verr") vampireError
 
-  case vampireResult of
-    Satisfiable -> return (False, vampireStats)
-    Refutation -> return (True, vampireStats)
-    Timeout -> throwError "timeout"
-    Error err -> throwError $ "vampire: " <> err
+  let checkResult = case vampireResult of
+                      Satisfiable -> Right False
+                      Refutation -> Right True
+                      Timeout -> Left CheckTimeout
+                      Error err -> Left (CheckError err)
+  return (checkResult, vampireStats)
+  -- case vampireResult of
+  --   Satisfiable -> return (False, vampireStats)
+  --   Refutation -> return (True, vampireStats)
+  --   Timeout -> throwError "timeout"
+  --   Error err -> throwError $ "vampire: " <> err
+
+data CheckError = CheckTimeout | CheckError !String
 
 
 showExpr :: Expr Text -> String
@@ -191,10 +232,10 @@ withErrorPrefix prefix m =
 
 -- | If content isn't empty, write it to the given file, otherwise delete the file.
 writeFileUnlessEmpty :: FilePath -> String -> IO ()
-writeFileUnlessEmpty file content = if isEmpty content
-                                    then removeFile file
-                                         `catchIOError`
-                                         (\e -> if isDoesNotExistError e then return () else ioError e)
-                                    else writeFile file content
+writeFileUnlessEmpty file content
+  | isEmpty content = removeFile file `catchIOError` ignoreDoesNotExistError
+  | otherwise       = writeFile file content
   where
     isEmpty = all isSpace
+    ignoreDoesNotExistError e | isDoesNotExistError e = return ()
+                              | otherwise             = ioError e
