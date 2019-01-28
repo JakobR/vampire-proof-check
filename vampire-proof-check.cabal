@@ -26,7 +26,7 @@ library
                   , VampireProofCheck.Types
                   , VampireProofCheck.Vampire
   other-modules:    VampireProofCheck.List
-  build-depends:    base >=4.11 && <4.12
+  build-depends:    base >=4.11 && <5
                   , containers
                   , deepseq
                   , megaparsec
@@ -43,7 +43,7 @@ library
 executable vampire-proof-check
   import:           warnings
   other-modules:    VampireProofCheck.Options
-  build-depends:    base >=4.11 && <4.12
+  build-depends:    base >=4.11 && <5
                   , vampire-proof-check
                   , containers
                   , directory
