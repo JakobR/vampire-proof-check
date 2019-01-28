@@ -3,3 +3,10 @@
   Probably not, since the ultimate goal is to have vampire find the complete proof by itself.
 * TODO Should we allow some mechanism to pass options with spaces to vampire?
   Currently we simply split the argument string with the function ~words~.
+* TODO Write shell script for vampire invocation into =--vampire-output-dir=
+  Be sure make it executable.
+  Use absolute paths in the scripts.
+  It should be possible to easily run vampire for a certain inference.
+  Also pass through additional options (would be helpful to add =--show_active on= later).
+* TODO Parallelize proof checking
+  Add a flag =-n= to set the number of threads, defaulting to the number of (real) CPU cores.
