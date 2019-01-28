@@ -8,27 +8,38 @@ module VampireProofCheck.Vampire
   ) where
 
 -- base
-import Control.Monad.IO.Class ( MonadIO(..) )
-import Data.List ( isPrefixOf )
-import System.Exit ( ExitCode(..) )
+import Control.Monad.IO.Class (MonadIO(..))
+import Data.List (isPrefixOf)
+import System.Exit (ExitCode(..))
 
 -- deepseq
-import Control.DeepSeq ( deepseq )
+import Control.DeepSeq (deepseq)
 
 -- process
-import System.Process ( readProcessWithExitCode )
+import System.Process (readProcessWithExitCode)
+
+-- safe
+import Safe (headDef)
 
 -- time
-import Data.Time.Clock ( NominalDiffTime, diffUTCTime )
-import Data.Time.Clock.System ( getSystemTime, systemToUTCTime )
+import Data.Time.Clock (NominalDiffTime, diffUTCTime)
+import Data.Time.Clock.System (getSystemTime, systemToUTCTime)
 
 
 -- NOTE: Maybe we should use NominalDiffTime instead of a naked integer?
 type Seconds = Int
 
+data VampireResult
+  = Satisfiable
+  | Refutation
+  | Timeout
+  | Error !String
+  deriving (Eq, Show)
+
 data VampireStats = VampireStats
   { vsRuntime :: !NominalDiffTime  -- ^ how long vampire was running
   }
+
 
 runVampire
   :: MonadIO m
@@ -52,25 +63,45 @@ runVampire vampireExe timeoutSecs additionalOptions input = do
 
   return $ (vampireResult, VampireStats{..}, output, err)
 
+
 parseVampireOutput :: ExitCode -> String -> VampireResult
 parseVampireOutput exitCode output =
-  case (exitCode, reasons) of
-    (ExitSuccess, ["Theorem"]) -> Refutation
-    (ExitSuccess, ["Unsatisfiable"]) -> Refutation
-    (ExitSuccess, ["CounterSatisfiable"]) -> Satisfiable
-    (_, ["Timeout"]) -> Timeout
-    (_, _) -> Error ("ExitCode = " <> show exitCode
-                      <> "; Unknown termination reason: " <> show reasons
-                      <> "\nOutput:\n" <> output)
-  where
-    reasonPrefix = "% SZS status "
-    extractReason = head . (++["<none>"]) . take 1 . words . drop (length reasonPrefix)
-    reasonLines = filter (reasonPrefix `isPrefixOf`) (lines output)
-    reasons = extractReason <$> reasonLines
+  case (exitCode, primaryReasons, secondaryReasons) of
 
-data VampireResult
-  = Satisfiable
-  | Refutation
-  | Timeout
-  | Error !String
-  deriving (Eq, Show)
+    (ExitSuccess, ["Theorem"], _) ->
+      Refutation
+
+    (ExitSuccess, ["Unsatisfiable"], _) ->
+      Refutation
+
+    (ExitSuccess, ["CounterSatisfiable"], _) ->
+      Satisfiable
+
+    (_, ["Timeout"], _) ->
+      Timeout
+
+    (_, [], ["Time limit"]) ->
+      Timeout
+
+    (_, [], ["Refutation not found, incomplete strategy"]) ->
+      Timeout
+      -- TODO: instead of Timeout, maybe we should use "Unknown":
+      -- data VampireResult = Refutation | Satisfiable | Unknown !UnknownReason
+      -- data UnknownReason = Timeout | IncompleteStrategy | Error !String
+
+    (_, _, _) ->
+      Error ("ExitCode = " <> show exitCode
+             <> "; Unknown termination reason: " <> show allReasons
+             <> "\nOutput:\n" <> output)
+
+  where
+    primaryReasons = headDef "<none>" . words <$> extractTerminationReasons "% SZS status " output
+    secondaryReasons = extractTerminationReasons "% Termination reason: " output
+    allReasons = (primaryReasons, secondaryReasons)
+
+
+extractTerminationReasons :: String -> String -> [String]
+extractTerminationReasons reasonPrefix output = extractReason <$> reasonLines
+  where
+    reasonLines = filter (reasonPrefix `isPrefixOf`) (lines output)
+    extractReason = drop (length reasonPrefix)

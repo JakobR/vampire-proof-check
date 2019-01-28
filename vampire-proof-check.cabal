@@ -32,9 +32,8 @@ library
                   , megaparsec
                   , mtl
                   , parser-combinators
-                  -- , prettyprinter
-                  -- , QuickCheck
                   , process
+                  , safe
                   , text
                   , time
   hs-source-dirs:   src
