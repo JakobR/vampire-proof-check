@@ -10,6 +10,7 @@ module VampireProofCheck.Parser
 import Control.Applicative ( empty, (<|>), many )
 import Data.Char ( isAlpha, isSpace )
 import Data.Either ( partitionEithers )
+import Data.Maybe ( fromMaybe )
 import Data.Void ( Void )
 
 -- containers
@@ -17,8 +18,9 @@ import qualified Data.Map.Strict as Map
 
 -- megaparsec
 import Text.Megaparsec
-  ( initialPos, eof, setPosition, parseErrorPretty
+  ( initialPos, eof, errorBundlePretty
   , parse, SourcePos, Parsec, (<?>), takeWhile1P
+  , State(..), PosState(..), updateParserState
   )
 import Text.Megaparsec.Char ( space1 )
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -103,6 +105,9 @@ proofP = do
   let proofStatements = Map.fromList stmts
   return Proof{..}
 
+setPosition :: SourcePos -> Parser ()
+setPosition pos = updateParserState $ \s -> s{statePosState = (statePosState s){ pstateSourcePos = pos }}
+
 parseProof'
   :: MonadError String m
   => SourcePos
@@ -110,8 +115,8 @@ parseProof'
   -> m Proof
 parseProof' pos str =
   case parse p "" str of
-    Left err -> throwError $ parseErrorPretty err
-    Right e -> return e
+    Left err -> throwError $ errorBundlePretty err
+    Right x -> return x
   where
     p :: Parser Proof
     p = do setPosition pos
@@ -122,6 +127,7 @@ parseProof' pos str =
 
 parseProof
   :: MonadError String m
-  => Text
+  => Maybe FilePath  -- ^ name of source file
+  -> Text            -- ^ text to parse
   -> m Proof
-parseProof = parseProof' (initialPos "<string>")
+parseProof srcName = parseProof' (initialPos $ fromMaybe "<string>" srcName)

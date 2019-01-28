@@ -55,7 +55,7 @@ items :: Parser a -> Parser (Range a)
 items p = Union <$> (item p `sepBy` MP.char ',')
 
 parseRange :: Parser a -> String -> Either String (Range a)
-parseRange p = first MP.parseErrorPretty . MP.parse (items p) ""
+parseRange p = first MP.errorBundlePretty . MP.parse (items p <* MP.eof) ""
 
 
 integer :: Parser Integer
