@@ -11,6 +11,7 @@ module Main
 -- base
 import Control.Monad (forM, forM_, when, unless)
 import Control.Monad.IO.Class (MonadIO(..))
+import Data.Bifunctor (first)
 import Data.Char (isSpace)
 import Data.List (intercalate)
 import System.Exit (die, exitSuccess)
@@ -27,7 +28,7 @@ import System.Directory (createDirectoryIfMissing, removeFile)
 import System.FilePath.Posix ((</>), (<.>))
 
 -- mtl
-import Control.Monad.Except (runExceptT,  MonadError(..))
+import Control.Monad.Except (liftEither, runExceptT,  MonadError(..))
 import Control.Monad.Reader (asks, runReaderT,  MonadReader(..))
 
 -- safe
@@ -119,12 +120,12 @@ checkProof proof@Proof{..} = do
 
     return (stmtId, result)
 
-  let falseStatements = fst <$> filter (not . isSuccess . snd) checkedStatements
+  let unprovedStatements = fst <$> filter (not . isSuccess . snd) checkedStatements
       idIsInference = maybe False isInference . (proofStatements Map.!?)
       numInferences = length $ filter (idIsInference . fst) checkedStatements
-  case falseStatements of
+  case unprovedStatements of
     [] -> return numInferences
-    _ -> throwError $ "statements do not hold: " <> show falseStatements
+    _ -> throwError $ "statements could not be proved: " <> show unprovedStatements
 
   where
     maxIdLen = maximumDef 0 (length . show <$> Map.keys proofStatements)
@@ -136,7 +137,7 @@ checkProof proof@Proof{..} = do
     showResult (Left u) = let reason = case u of Timeout -> "timeout"
                                                  IncompleteStrategy -> "incomplete strategy"
                                                  Error _ -> "error"
-                          in "✗ [" <> reason <> "]"
+                          in "? [" <> reason <> "]"
     showStats VampireStats{..} = " (vampire: " <> show vsRuntime <> ")"
 
 
@@ -154,6 +155,7 @@ checkStatementId Proof{..} checkId =
       return (Right True, Nothing)
     Just (Inference conclusion premiseIds) -> do
       -- Inference may only depend on earlier statements
+      -- (this is just a simple way to enforce that the dependency graph is acyclic)
       case filter (>= checkId) premiseIds of
         [] -> return ()
         xs -> throwError $ "inference may only depends on earlier formulas, but depends on "
@@ -163,13 +165,15 @@ checkStatementId Proof{..} checkId =
       let
         lookupId :: Id -> Either Id Statement
         lookupId theId = maybe (Left theId) Right (Map.lookup theId proofStatements)
+        formatLookupError errId = "inference depends on non-existing premise " <> show errId
 
-      case sequenceA (lookupId <$> premiseIds) of
-        Left errId ->
-          throwError $ "inference depends on non-existing premise " <> show errId
-        Right premises -> do
-          (r, s) <- checkImplication (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
-          return (r, Just s)
+      premises <-
+        liftEitherWith formatLookupError $ sequenceA (lookupId <$> premiseIds)
+
+      (r, s) <-
+        checkImplication (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
+
+      return (r, Just s)
 
 
 checkImplication
@@ -185,7 +189,10 @@ checkImplication outputName decls premises conclusion = do
     assertExpr :: Expr Text -> Expr Text
     assertExpr e = SExpr [ Value "assert", e ]
     premiseAssertions = assertExpr . unFormula <$> premises
-    conclusionAssertion = SExpr [ Value "assert-not", unFormula conclusion ]
+    conclusionAssertion =
+      if optNoAssertNot
+      then SExpr [ Value "assert", SExpr [ Value "not", unFormula conclusion ] ]
+      else SExpr [ Value "assert-not", unFormula conclusion ]
     exprs :: [Expr Text]
     exprs = (unDecl <$> decls)
             <> premiseAssertions
@@ -223,6 +230,10 @@ withErrorPrefix
   -> m a
 withErrorPrefix prefix m =
   m `catchError` \err -> throwError (prefix <> ": " <> err)
+
+
+liftEitherWith :: MonadError e m => (e' -> e) -> Either e' a -> m a
+liftEitherWith f = liftEither . first f
 
 
 -- | If content isn't empty, write it to the given file, otherwise delete the file.

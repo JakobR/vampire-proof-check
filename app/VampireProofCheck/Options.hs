@@ -22,6 +22,7 @@ data Options = Options
   , optCheckOnlyIds :: Maybe (Range Id)
   , optContinueOnError :: Bool
   , optVerbose :: Bool
+  , optNoAssertNot :: Bool
   , optProofFile :: Maybe FilePath
   , optDebug :: Bool
   }
@@ -38,6 +39,7 @@ optionsParser =
   <*> optional checkOnlyIds
   <*> continueOnErrorFlag
   <*> verboseFlag
+  <*> noAssertNotFlag
   <*> optional proofFile
   <*> debugFlag
 
@@ -91,6 +93,12 @@ optionsParser =
       short 'v'
       <> long "verbose"
       <> help "More output"
+
+    noAssertNotFlag =
+      switch $
+      long "no-assert-not"
+      <> help ("Use (assert (not ...)) instead of (assert-not ...). "
+               ++ "Useful for vampire versions without smtlib_extras.")
 
     proofFile =
       argument str $

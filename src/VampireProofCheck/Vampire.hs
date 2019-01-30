@@ -127,6 +127,9 @@ parseVampireOutput exitCode output =
     (_, [], ["Refutation not found, incomplete strategy"]) ->
       Unknown IncompleteStrategy
 
+    (_, [], ["Refutation not found, non-redundant clauses discarded"]) ->
+      Unknown IncompleteStrategy
+
     (_, _, _) ->
       let msg = "ExitCode = " <> show exitCode
                 <> "; Unknown termination reason: " <> show allReasons
