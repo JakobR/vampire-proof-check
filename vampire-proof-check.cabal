@@ -47,6 +47,7 @@ executable vampire-proof-check
                   , vampire-proof-check
                   , containers
                   , directory
+                  , exceptions
                   , filepath
                   , mtl
                   , optparse-applicative

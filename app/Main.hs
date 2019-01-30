@@ -9,12 +9,13 @@ module Main
   ) where
 
 -- base
+import Control.Exception (Exception)
 import Control.Monad (forM, forM_, when, unless)
 import Control.Monad.IO.Class (MonadIO(..))
-import Data.Bifunctor (first)
 import Data.Char (isSpace)
 import Data.List (intercalate)
-import System.Exit (die, exitSuccess)
+import Data.Typeable (Typeable)
+import System.Exit (exitSuccess)
 import System.IO (hPrint, hSetBuffering, stderr, stdout, BufferMode(..))
 import System.IO.Error (catchIOError, ioError, isDoesNotExistError)
 
@@ -24,12 +25,15 @@ import qualified Data.Map.Strict as Map
 -- directory
 import System.Directory (createDirectoryIfMissing, removeFile)
 
+-- exceptions
+import Control.Monad.Catch (MonadThrow(..))
+
 -- filepath
 import System.FilePath.Posix ((</>), (<.>))
 
 -- mtl
-import Control.Monad.Except (liftEither, runExceptT,  MonadError(..))
-import Control.Monad.Reader (asks, runReaderT,  MonadReader(..))
+-- import Control.Monad.Except (liftEither, runExceptT,  MonadError(..))
+import Control.Monad.Reader (runReaderT,  MonadReader(..))
 
 -- safe
 import Safe (maximumDef)
@@ -53,22 +57,31 @@ main = do
   hSetBuffering stdout NoBuffering
   opts@Options{..} <- execOptionsParser
   when optDebug $ hPrint stderr opts
+
   input <- readInput optProofFile
 
-  result <- runExceptT $ do
-    proof <- withErrorPrefix "unable to parse input" $ parseProof optProofFile input
+  proof <-
+    liftEitherWith (fatalError . ("unable to parse input:\n"++)) $
+    parseProof optProofFile input
 
-    -- Create output directory if it doesn't exist already
-    whenJust optVampireOutputDir (liftIO . createDirectoryIfMissing True)
+  -- Create output directory if it doesn't exist already
+  whenJust optVampireOutputDir (createDirectoryIfMissing True)
 
-    runReaderT (checkProof proof) opts
+  numInferences <- runReaderT (checkProof proof) opts
+  putStrLn $ "Checked " <> showQuantity numInferences "inference" <> ". All of them are correct!"
+  exitSuccess
 
-  case result of
-    Left err ->
-      die $ "Error: " <> err
-    Right numInferences -> do
-      putStrLn $ "Checked " <> showQuantity numInferences "inference" <> ". Proof is correct!"
-      exitSuccess
+
+data FatalError = FatalError !String
+  deriving Typeable
+
+instance Show FatalError where
+  show (FatalError msg) = "Error: " <> msg
+
+instance Exception FatalError
+
+fatalError :: MonadThrow m => String -> m a
+fatalError msg = throwM (FatalError msg)
 
 
 -- | Read all data from file or stdin
@@ -87,93 +100,107 @@ showQuantity n name = show n <> " " <> name <> "s"
 
 
 checkProof
-  :: (MonadIO m, MonadReader Options m, MonadError String m)
+  :: (MonadIO m, MonadReader Options m, MonadThrow m)
   => Proof
   -> m Int
 checkProof proof@Proof{..} = do
-  checkId <- maybe (const True) (flip Range.member) <$> asks optCheckOnlyIds
+  Options{..} <- ask
+
+  let checkId :: Id -> Bool
+      checkId = maybe (const True) (flip Range.member) optCheckOnlyIds
+
   let idsToCheck = filter checkId (Map.keys proofStatements)
 
   checkedStatements <- forM idsToCheck $ \stmtId -> do
-    verbose <- asks optVerbose
-    when verbose $ liftIO $
+    when optVerbose $ liftIO $
       putStr $ "Checking statement " <> showIdPadded stmtId <> "... "
 
-    (result, mVampire) <-
-      withErrorPrefix ("while checking statement " <> show stmtId) $ checkStatementId proof stmtId
+    CheckResult{..} <- checkStatementId proof stmtId
 
-    when verbose $ liftIO $
-      putStrLn $ showResult result <> maybe "" showStats mVampire
+    when optVerbose $ liftIO $
+      putStrLn (showResultMark crState
+                <> maybe "" showReason crReason
+                <> maybe "" showStats crStats)
 
-    continueOnError <- asks optContinueOnError
-    unless continueOnError $
-      case result of
-        Right True ->
-          return ()  -- success
-        Right False ->
-          throwError $ "statement " <> show stmtId <> " does not hold!"
-        Left u ->
-          let msg = case u of Timeout -> "timeout"
-                              IncompleteStrategy -> "incomplete strategy"
-                              Error err -> "vampire: " <> err
-          in throwError $ "while checking statement " <> show stmtId <> ": " <> msg
+    case crState of
+      StatementTrue ->
+        return ()  -- success
+      StatementFalse ->
+        unless optContinueOnUnproved $
+        fatalError $ "statement " <> show stmtId <> " does not hold!"
+      StatementTimeout ->
+        unless optContinueOnUnproved $
+        fatalError $ "while checking statement " <> show stmtId <> ": " <> maybe "timeout(?)" id crReason
+      StatementError err ->
+        unless optContinueOnError $
+        fatalError $ "while checking statement " <> show stmtId <> ": vampire error:" <> err
 
-    return (stmtId, result)
+    return (stmtId, crState)
 
   let unprovedStatements = fst <$> filter (not . isSuccess . snd) checkedStatements
       idIsInference = maybe False isInference . (proofStatements Map.!?)
       numInferences = length $ filter (idIsInference . fst) checkedStatements
   case unprovedStatements of
     [] -> return numInferences
-    _ -> throwError $ "statements could not be proved: " <> show unprovedStatements
+    _ -> fatalError $ "statements could not be proved: " <> show unprovedStatements
 
   where
     maxIdLen = maximumDef 0 (length . show <$> Map.keys proofStatements)
     showIdPadded stmtId = let s = show stmtId in replicate (maxIdLen - length s) ' ' <> s
-    isSuccess (Right b) = b
-    isSuccess (Left _) = False
-    showResult (Right True) = "✓"
-    showResult (Right False) = "✗"
-    showResult (Left u) = let reason = case u of Timeout -> "timeout"
-                                                 IncompleteStrategy -> "incomplete strategy"
-                                                 Error _ -> "error"
-                          in "? [" <> reason <> "]"
+    isSuccess StatementTrue = True
+    isSuccess _ = False
+    showResultMark StatementTrue = "✓"
+    showResultMark StatementFalse = "✗"
+    showResultMark _ = "?"
+    showReason reason = " [" <> reason <> "]"
     showStats VampireStats{..} = " (vampire: " <> show vsRuntime <> ")"
 
 
+data StatementState
+  = StatementTrue           -- ^ statement was checked successfully and we know that it holds
+  | StatementFalse          -- ^ statement was refuted, i.e., we know it is false
+  | StatementTimeout        -- ^ timeout/incomplete/etc.; where we continue with --continue-on-timeout
+  | StatementError !String  -- ^ error with error message; continue only with --continue-on-error
+
+data CheckResult = CheckResult
+  { crState :: !StatementState
+  , crReason :: !(Maybe String)  -- ^ optional reason to print in [brackets] after the result mark
+  , crStats :: !(Maybe VampireStats)
+  }
+
+
 checkStatementId
-  :: (MonadIO m, MonadReader Options m, MonadError String m)
+  :: forall m. (MonadIO m, MonadReader Options m, MonadThrow m)
   => Proof -- ^ the proof which is being checked
   -> Id    -- ^ Id of the statement that should be checked
-  -> m (Either UnknownReason Bool, Maybe VampireStats)
+  -> m CheckResult
 checkStatementId Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
-      throwError $ "id doesn't appear in proof: " <> show checkId
+      fatalError ("id doesn't appear in proof: " <> show checkId)
     Just (Axiom _) ->
       -- Nothing to check for axioms
-      return (Right True, Nothing)
+      return $ CheckResult StatementTrue (Just "axiom") Nothing
     Just (Inference conclusion premiseIds) -> do
       -- Inference may only depend on earlier statements
       -- (this is just a simple way to enforce that the dependency graph is acyclic)
       case filter (>= checkId) premiseIds of
         [] -> return ()
-        xs -> throwError $ "inference may only depends on earlier formulas, but depends on "
-                           <> intercalate ", " (show <$> xs)
+        xs -> fatalError ("inference " <> show checkId
+                          <> " may only depends on earlier formulas, but depends on "
+                          <> intercalate ", " (show <$> xs))
 
       -- Look up premises and fail if one doesn't exist
       let
         lookupId :: Id -> Either Id Statement
-        lookupId theId = maybe (Left theId) Right (Map.lookup theId proofStatements)
-        formatLookupError errId = "inference depends on non-existing premise " <> show errId
+        lookupId theId = maybe (Left theId) Right (proofStatements Map.!? theId)
 
-      premises <-
-        liftEitherWith formatLookupError $ sequenceA (lookupId <$> premiseIds)
+        throwLookupError errId = fatalError ("inference " <> show checkId
+                                             <> " depends on non-existing premise " <> show errId)
 
-      (r, s) <-
-        checkImplication (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
+      premises <- liftEitherWith throwLookupError $ sequence (lookupId <$> premiseIds)
 
-      return (r, Just s)
+      checkImplication (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
 
 
 checkImplication
@@ -182,24 +209,36 @@ checkImplication
   -> [Declaration]  -- ^ additional declarations
   -> [Formula]      -- ^ the premises
   -> Formula        -- ^ the conclusion
-  -> m (Either UnknownReason Bool, VampireStats)
+  -> m CheckResult
 checkImplication outputName decls premises conclusion = do
   Options{..} <- ask
-  let
-    assertExpr :: Expr Text -> Expr Text
-    assertExpr e = SExpr [ Value "assert", e ]
-    premiseAssertions = assertExpr . unFormula <$> premises
-    conclusionAssertion =
-      if optNoAssertNot
-      then SExpr [ Value "assert", SExpr [ Value "not", unFormula conclusion ] ]
-      else SExpr [ Value "assert-not", unFormula conclusion ]
-    exprs :: [Expr Text]
-    exprs = (unDecl <$> decls)
-            <> premiseAssertions
-            <> [conclusionAssertion]
-    vampireInput = intercalate "\n" (showExpr <$> exprs)
-    outputBasename = (</> ("inference_" ++ outputName)) <$> optVampireOutputDir
-    additionalOptions = words optVampireOptions
+  let exprs = exprsForImplicationCheck optAssertNot decls premises conclusion
+
+  (vampireResult, vampireStats) <- checkExprs outputName exprs
+
+  return $ case vampireResult of
+    Refutation ->
+      CheckResult StatementTrue Nothing (Just vampireStats)
+    Satisfiable ->
+      CheckResult StatementFalse Nothing (Just vampireStats)
+    Unknown Timeout ->
+      CheckResult StatementTimeout (Just "timeout") (Just vampireStats)
+    Unknown IncompleteStrategy ->
+      CheckResult StatementTimeout (Just "incomplete strategy") (Just vampireStats)
+    Unknown (Error msg) ->
+      CheckResult (StatementError msg) (Just "error") (Just vampireStats)
+
+
+checkExprs
+  :: (MonadIO m, MonadReader Options m)
+  => String         -- ^ base for output file names
+  -> [Expr Text]    -- ^ expressions to check with vampire
+  -> m (Result, VampireStats)
+checkExprs outputName exprs = do
+  Options{..} <- ask
+  let vampireInput = intercalate "\n" (showExpr <$> exprs)
+      outputBasename = (</> outputName) <$> optVampireOutputDir
+      additionalOptions = words optVampireOptions
 
   forM_ outputBasename $ \basename -> liftIO $
     writeFile (basename <.> ".in.smt2") vampireInput
@@ -211,11 +250,28 @@ checkImplication outputName decls premises conclusion = do
     writeFile (basename <.> ".vout") vampireOutput
     writeFileUnlessEmpty (basename <.> ".verr") vampireError
 
-  let checkResult = case vampireResult of
-                      Satisfiable -> Right False
-                      Refutation -> Right True
-                      Unknown u -> Left u
-  return (checkResult, vampireStats)
+  return (vampireResult, vampireStats)
+
+
+assertExpr :: Expr Text -> Expr Text
+assertExpr e = SExpr [ Value "assert", e ]
+
+
+assertNotExpr :: OptAssertNot -> Expr Text -> Expr Text
+assertNotExpr AvoidAssertNot expr = SExpr [ Value "assert", SExpr [ Value "not", expr ] ]
+assertNotExpr UseAssertNot expr = SExpr [ Value "assert-not", expr ]
+
+
+exprsForImplicationCheck
+  :: OptAssertNot   -- ^ whether to avoid assert-not statements
+  -> [Declaration]  -- ^ declarations
+  -> [Formula]      -- ^ premises
+  -> Formula        -- ^ conclusion
+  -> [Expr Text]    -- ^ SMT-LIB 2 expressions for implication check
+exprsForImplicationCheck optAssertNot decls premises conclusion =
+  (unDecl <$> decls)
+  <> (assertExpr . unFormula <$> premises)
+  <> [assertNotExpr optAssertNot . unFormula $ conclusion]
 
 
 showExpr :: Expr Text -> String
@@ -223,17 +279,18 @@ showExpr (Value v) = Text.unpack v
 showExpr (SExpr xs) = "(" <> intercalate " " (showExpr <$> xs) <> ")"
 
 
-withErrorPrefix
-  :: MonadError String m
-  => String
-  -> m a
-  -> m a
-withErrorPrefix prefix m =
-  m `catchError` \err -> throwError (prefix <> ": " <> err)
+-- withErrorPrefix
+--   :: MonadError String m
+--   => String
+--   -> m a
+--   -> m a
+-- withErrorPrefix prefix m =
+--   m `catchError` \err -> throwError (prefix <> ": " <> err)
 
 
-liftEitherWith :: MonadError e m => (e' -> e) -> Either e' a -> m a
-liftEitherWith f = liftEither . first f
+liftEitherWith :: MonadThrow m => (e -> m a) -> Either e a -> m a
+liftEitherWith _ (Right x) = return x
+liftEitherWith throw (Left e) = throw e
 
 
 -- | If content isn't empty, write it to the given file, otherwise delete the file.

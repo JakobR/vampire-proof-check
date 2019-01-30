@@ -1,5 +1,6 @@
 module VampireProofCheck.Options
-  ( Options(..)
+  ( OptAssertNot(..)
+  , Options(..)
   , execOptionsParser
   ) where
 
@@ -14,19 +15,24 @@ import Data.Range (parseIntegerRange', Range(..))
 import VampireProofCheck.Types (Id(..))
 
 
+data OptAssertNot = AvoidAssertNot | UseAssertNot
+  deriving Show
+
+
 data Options = Options
   { optVampireExe :: FilePath
   , optVampireTimeout :: Maybe DiffTime
   , optVampireOptions :: String
   , optVampireOutputDir :: Maybe FilePath
   , optCheckOnlyIds :: Maybe (Range Id)
+  , optContinueOnUnproved :: Bool
   , optContinueOnError :: Bool
   , optVerbose :: Bool
-  , optNoAssertNot :: Bool
+  , optAssertNot :: OptAssertNot
   , optProofFile :: Maybe FilePath
   , optDebug :: Bool
   }
-  deriving (Show)
+  deriving Show
 
 
 optionsParser :: Parser Options
@@ -37,9 +43,10 @@ optionsParser =
   <*> vampireOptions
   <*> optional vampireOutputDir
   <*> optional checkOnlyIds
+  <*> continueOnUnprovedFlag
   <*> continueOnErrorFlag
   <*> verboseFlag
-  <*> noAssertNotFlag
+  <*> assertNot
   <*> optional proofFile
   <*> debugFlag
 
@@ -82,11 +89,19 @@ optionsParser =
                ++ "(for example: 1,2,5-10)")
       <> metavar "ID"
 
+    continueOnUnprovedFlag =
+      switch $
+      short 'c'
+      <> long "continue-on-unproved"
+      <> help ("When a proof step cannot be proved due to a timeout "
+               ++ "or because it does not hold, "
+               ++ "continue checking the subsequent inferences.")
+
     continueOnErrorFlag =
       switch $
-      short 'e'
-      <> long "continue-on-error"
-      <> help "When a proof step fails, continue checking the subsequent inferences."
+      long "continue-on-error"
+      <> help ("When a proof step fails due to a vampire error, "
+               ++ "continue checking the subsequent inferences.")
 
     verboseFlag =
       switch $
@@ -94,9 +109,9 @@ optionsParser =
       <> long "verbose"
       <> help "More output"
 
-    noAssertNotFlag =
-      switch $
-      long "no-assert-not"
+    assertNot =
+      flag UseAssertNot AvoidAssertNot $
+      long "avoid-assert-not"
       <> help ("Use (assert (not ...)) instead of (assert-not ...). "
                ++ "Useful for vampire versions without smtlib_extras.")
 
