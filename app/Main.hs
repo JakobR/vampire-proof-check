@@ -1,23 +1,23 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main
   ( main
   ) where
 
 -- base
-import Control.Exception (Exception)
-import Control.Monad (forM, forM_, when, unless)
-import Control.Monad.IO.Class (MonadIO(..))
+import Control.Concurrent.QSem
+import Control.Exception (bracket_, Exception)
+import Control.Monad (forM_, when, unless)
 import Data.Char (isSpace)
 import Data.List (intercalate)
 import Data.Typeable (Typeable)
 import System.Exit (exitSuccess)
 import System.IO (hPrint, hSetBuffering, stderr, stdout, BufferMode(..))
 import System.IO.Error (catchIOError, ioError, isDoesNotExistError)
+
+-- async
+import Control.Concurrent.Async (forConcurrently)
 
 -- containers
 import qualified Data.Map.Strict as Map
@@ -31,10 +31,6 @@ import Control.Monad.Catch (MonadThrow(..))
 -- filepath
 import System.FilePath.Posix ((</>), (<.>))
 
--- mtl
--- import Control.Monad.Except (liftEither, runExceptT,  MonadError(..))
-import Control.Monad.Reader (runReaderT,  MonadReader(..))
-
 -- safe
 import Safe (maximumDef)
 
@@ -45,6 +41,7 @@ import qualified Data.Text.IO
 
 -- vampire-proof-check
 import qualified Data.Range as Range
+import ProgressReporter
 import VampireProofCheck.Options
 import VampireProofCheck.Parser (parseProof)
 import VampireProofCheck.Types
@@ -67,7 +64,7 @@ main = do
   -- Create output directory if it doesn't exist already
   whenJust optVampireOutputDir (createDirectoryIfMissing True)
 
-  numInferences <- runReaderT (checkProof proof) opts
+  numInferences <- checkProof opts proof
   putStrLn $ "Checked " <> showQuantity numInferences "inference" <> ". All of them are correct!"
   exitSuccess
 
@@ -99,43 +96,50 @@ showQuantity 1 name = "1 " <> name
 showQuantity n name = show n <> " " <> name <> "s"
 
 
+
 checkProof
-  :: (MonadIO m, MonadReader Options m, MonadThrow m)
-  => Proof
-  -> m Int
-checkProof proof@Proof{..} = do
-  Options{..} <- ask
+  :: Options
+  -> Proof
+  -> IO Int
+checkProof opts@Options{..} proof@Proof{..} = do
 
   let checkId :: Id -> Bool
       checkId = maybe (const True) (flip Range.member) optCheckOnlyIds
 
   let idsToCheck = filter checkId (Map.keys proofStatements)
 
-  checkedStatements <- forM idsToCheck $ \stmtId -> do
-    when optVerbose $ liftIO $
-      putStr $ "Checking statement " <> showIdPadded stmtId <> "... "
+  -- We use a semaphore to limit the number of concurrently executing processes.
+  -- (Downside of this solution: creates one thread per statement, and all at the start.
+  -- Ideally we'd use a fixed pool of worker threads instead, but it's not a big problem here.)
+  workerLimitSem <- newQSem (max 1 optNumWorkers)
 
-    CheckResult{..} <- checkStatementId proof stmtId
+  checkedStatements <-
+    withProgressReporterIf optVerbose "Checking statements: " $ \ProgressReporter{..} ->
+      forConcurrently idsToCheck $ \stmtId ->
+        bracket_ (waitQSem workerLimitSem) (signalQSem workerLimitSem) $ do
+          tok <- reportStart (show stmtId)
 
-    when optVerbose $ liftIO $
-      putStrLn (showResultMark crState
-                <> maybe "" showReason crReason
-                <> maybe "" showStats crStats)
+          CheckResult{..} <- checkStatementId opts proof stmtId
 
-    case crState of
-      StatementTrue ->
-        return ()  -- success
-      StatementFalse ->
-        unless optContinueOnUnproved $
-        fatalError $ "statement " <> show stmtId <> " does not hold!"
-      StatementTimeout ->
-        unless optContinueOnUnproved $
-        fatalError $ "while checking statement " <> show stmtId <> ": " <> maybe "timeout(?)" id crReason
-      StatementError err ->
-        unless optContinueOnError $
-        fatalError $ "while checking statement " <> show stmtId <> ": vampire error:" <> err
+          reportEnd tok ("Statement " <> showIdPadded stmtId <> ": "
+                         <> showResultMark crState
+                         <> maybe "" showReason crReason
+                         <> maybe "" showStats crStats)
 
-    return (stmtId, crState)
+          case crState of
+            StatementTrue ->
+              return ()  -- success
+            StatementFalse ->
+              unless optContinueOnUnproved $
+              fatalError $ "statement " <> show stmtId <> " does not hold!"
+            StatementTimeout ->
+              unless optContinueOnUnproved $
+              fatalError $ "while checking statement " <> show stmtId <> ": " <> maybe "timeout(?)" id crReason
+            StatementError err ->
+              unless optContinueOnError $
+              fatalError $ "while checking statement " <> show stmtId <> ": vampire error:" <> err
+
+          return (stmtId, crState)
 
   let unprovedStatements = fst <$> filter (not . isSuccess . snd) checkedStatements
       idIsInference = maybe False isInference . (proofStatements Map.!?)
@@ -170,11 +174,11 @@ data CheckResult = CheckResult
 
 
 checkStatementId
-  :: forall m. (MonadIO m, MonadReader Options m, MonadThrow m)
-  => Proof -- ^ the proof which is being checked
+  :: Options
+  -> Proof -- ^ the proof which is being checked
   -> Id    -- ^ Id of the statement that should be checked
-  -> m CheckResult
-checkStatementId Proof{..} checkId =
+  -> IO CheckResult
+checkStatementId opts Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
       fatalError ("id doesn't appear in proof: " <> show checkId)
@@ -200,21 +204,21 @@ checkStatementId Proof{..} checkId =
 
       premises <- liftEitherWith throwLookupError $ sequence (lookupId <$> premiseIds)
 
-      checkImplication (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
+      checkImplication opts (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
 
 
 checkImplication
-  :: (MonadIO m, MonadReader Options m)
-  => String         -- ^ name for output file
+  :: Options
+  -> String         -- ^ name for output file
   -> [Declaration]  -- ^ additional declarations
   -> [Formula]      -- ^ the premises
   -> Formula        -- ^ the conclusion
-  -> m CheckResult
-checkImplication outputName decls premises conclusion = do
-  Options{..} <- ask
+  -> IO CheckResult
+checkImplication opts@Options{..} outputName decls premises conclusion = do
+
   let exprs = exprsForImplicationCheck optAssertNot decls premises conclusion
 
-  (vampireResult, vampireStats) <- checkExprs outputName exprs
+  (vampireResult, vampireStats) <- checkExprs opts outputName exprs
 
   return $ case vampireResult of
     Refutation ->
@@ -230,23 +234,23 @@ checkImplication outputName decls premises conclusion = do
 
 
 checkExprs
-  :: (MonadIO m, MonadReader Options m)
-  => String         -- ^ base for output file names
+  :: Options
+  -> String         -- ^ base for output file names
   -> [Expr Text]    -- ^ expressions to check with vampire
-  -> m (Result, VampireStats)
-checkExprs outputName exprs = do
-  Options{..} <- ask
+  -> IO (Result, VampireStats)
+checkExprs Options{..} outputName exprs = do
+
   let vampireInput = intercalate "\n" (showExpr <$> exprs)
       outputBasename = (</> outputName) <$> optVampireOutputDir
       additionalOptions = words optVampireOptions
 
-  forM_ outputBasename $ \basename -> liftIO $
+  forM_ outputBasename $ \basename ->
     writeFile (basename <.> ".in.smt2") vampireInput
 
-  (vampireResult, vampireStats, vampireOutput, vampireError) <- liftIO $
+  (vampireResult, vampireStats, vampireOutput, vampireError) <-
     runVampire' optDebug optVampireExe optVampireTimeout additionalOptions vampireInput
 
-  forM_ outputBasename $ \basename -> liftIO $ do
+  forM_ outputBasename $ \basename -> do
     writeFile (basename <.> ".vout") vampireOutput
     writeFileUnlessEmpty (basename <.> ".verr") vampireError
 
@@ -288,9 +292,9 @@ showExpr (SExpr xs) = "(" <> intercalate " " (showExpr <$> xs) <> ")"
 --   m `catchError` \err -> throwError (prefix <> ": " <> err)
 
 
-liftEitherWith :: MonadThrow m => (e -> m a) -> Either e a -> m a
+liftEitherWith :: Monad m => (e -> m a) -> Either e a -> m a
 liftEitherWith _ (Right x) = return x
-liftEitherWith throw (Left e) = throw e
+liftEitherWith f (Left e) = f e
 
 
 -- | If content isn't empty, write it to the given file, otherwise delete the file.

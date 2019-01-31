@@ -4,6 +4,9 @@ module VampireProofCheck.Options
   , execOptionsParser
   ) where
 
+-- base
+import GHC.Conc (getNumProcessors)
+
 -- optparse-applicative
 import Options.Applicative
 
@@ -27,6 +30,7 @@ data Options = Options
   , optCheckOnlyIds :: Maybe (Range Id)
   , optContinueOnUnproved :: Bool
   , optContinueOnError :: Bool
+  , optNumWorkers :: Int
   , optVerbose :: Bool
   , optAssertNot :: OptAssertNot
   , optProofFile :: Maybe FilePath
@@ -35,8 +39,8 @@ data Options = Options
   deriving Show
 
 
-optionsParser :: Parser Options
-optionsParser =
+optionsParser :: Int -> Parser Options
+optionsParser numProcessors =
   pure Options
   <*> vampireExe
   <*> optional vampireTimeout
@@ -45,6 +49,7 @@ optionsParser =
   <*> optional checkOnlyIds
   <*> continueOnUnprovedFlag
   <*> continueOnErrorFlag
+  <*> numWorkers
   <*> verboseFlag
   <*> assertNot
   <*> optional proofFile
@@ -87,7 +92,7 @@ optionsParser =
       long "only"
       <> help ("Only check the statements in the given range of ids "
                ++ "(for example: 1,2,5-10)")
-      <> metavar "ID"
+      <> metavar "IDs"
 
     continueOnUnprovedFlag =
       switch $
@@ -102,6 +107,14 @@ optionsParser =
       long "continue-on-error"
       <> help ("When a proof step fails due to a vampire error, "
                ++ "continue checking the subsequent inferences.")
+
+    numWorkers =
+      option auto $
+      short 'n'
+      <> long "num-workers"
+      <> value numProcessors
+      <> showDefault
+      <> help "How many vampire instances to run in parallel"
 
     verboseFlag =
       switch $
@@ -126,16 +139,19 @@ optionsParser =
       <> help "Print some debug output"
 
 
-optionsParserInfo :: ParserInfo Options
-optionsParserInfo =
-  info (optionsParser <**> helper)
+optionsParserInfo :: Int -> ParserInfo Options
+optionsParserInfo numProcessors =
+  info (optionsParser numProcessors <**> helper)
        (fullDesc
         <> progDesc "Check correctness of proofs with vampire"
         <> header "vampire-proof-check")
 
 
 execOptionsParser :: IO Options
-execOptionsParser = execParser optionsParserInfo
+execOptionsParser = do
+  -- NOTE: we want processors and not capabilities, since vampire runs as a separate process
+  numProcessors <- max 1 <$> getNumProcessors
+  execParser (optionsParserInfo numProcessors)
 
 
 idRange :: ReadM (Range Id)

@@ -8,13 +8,10 @@
   Use absolute paths in the scripts.
   It should be possible to easily run vampire for a certain inference.
   Also pass through additional options (would be helpful to add =--show_active on= later).
-* TODO Parallelize proof checking
-  Add a flag =-n= to set the number of threads, defaulting to the number of (real) CPU cores.
-* TODO Change the "--continue-on-error" options to distinguish between timeouts and errors
-  We want an option s.t. we can continue on timeout/incomplete strategy,
-  but abort on errors.
-  Maybe just rename it to "-c"/"--continue-on-timeout"?
-* TODO Add option to check if axioms are inconsistent
-  Add option "--check-axioms".
-  Of course it's not decidable, but it might still help to rule out some mistakes.
-* TODO Print =[axiom]= after check mark if it's an axiom
+* TODO Add option to check if premises are inconsistent
+  Add option "--check-premises".
+  For each inference, pass the premises (without the conclusion) to vampire.
+  If it's unsatisfiable, print a warning that the inference is trivial
+  (but not an error, since it's still a valid inference).
+  Of course it's not decidable, but it might still help to catch some mistakes.
+* TODO When output is not a terminal, skip the status line (in module =ProgressReporter=)
