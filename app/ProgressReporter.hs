@@ -1,11 +1,14 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module ProgressReporter
-  ( ProgressReporter(..)
-  , withProgressReporter
-  , withProgressReporterIf
+  ( Config(..)
+  , Handle
+  , reportStart
+  , reportEnd
   , TaskName
+  , withNew
   ) where
 
 -- base
@@ -26,68 +29,103 @@ import qualified Data.IntMap.Strict as IntMap
 import Control.Concurrent.STM
 
 
-data ProgressReporter t = ProgressReporter
+
+data Config = Config
+  { enabled :: !Bool
+    -- ^ If enabled is False, a no-op ProgressReporter will be used.
+  , statusLinePrefix :: !String
+    -- ^ The prefix is printed on the status line before the list of tasks in progress.
+  }
+
+
+data Handle t = Handle
   { reportStart :: TaskName -> IO t
   , reportEnd :: t -> String -> IO ()
   }
 
 
-data Message
+type TaskName = String
+
+
+data InternalEnv = InternalEnv
+  { sendCommand :: !(Command -> STM ())
+  , getNextToken :: !(STM Token)
+  }
+
+
+data OutputThreadEnv = OutputThreadEnv
+  { statusLinePrefix :: !String
+  , readCommand :: !(IO Command)
+  }
+
+
+data Command
   = TaskStart !Token !TaskName
   | TaskEnd !Token !String
   | Stop !String
 
 
-data Internal = Internal
-  { sendMessage :: !(Message -> STM ())
-  , getNextToken :: !(STM Token)
-  }
-
-
-data OutputEnv = OutputEnv
-  { statusLinePrefix :: !String
-  , readMessage :: !(IO Message)
-  }
-
-
 type Token = Int
-type TaskName = String
-type Tasks = IntMap TaskName
 
 
-create :: String -> IO (Internal, OutputEnv)
-create statusLinePrefix = do
-  messageChan <- newTChanIO
-  let sendMessage = writeTChan messageChan
-      readMessage = atomically $ readTChan messageChan
+create :: Config -> IO (InternalEnv, OutputThreadEnv)
+create Config{..} = do
+  cmdChan <- newTChanIO
+  let sendCommand = writeTChan cmdChan
+      readCommand = atomically $ readTChan cmdChan
   nextTokenVar <- newTVarIO 1
   let getNextToken = readTVar nextTokenVar <* modifyTVar' nextTokenVar (+1)
-  return (Internal{..}, OutputEnv{..})
+  return (InternalEnv{..}, OutputThreadEnv{..})
 
 
-reportStart' :: Internal -> TaskName -> IO Token
-reportStart' Internal{..} name = atomically $ do
+reportStart' :: InternalEnv -> TaskName -> IO Token
+reportStart' InternalEnv{..} name = atomically $ do
   token <- getNextToken
-  sendMessage (TaskStart token name)
+  sendCommand (TaskStart token name)
   return token
 
 
-reportEnd' :: Internal -> Token -> String -> IO ()
-reportEnd' Internal{..} token msg = atomically $
-  sendMessage (TaskEnd token msg)
+reportEnd' :: InternalEnv -> Token -> String -> IO ()
+reportEnd' InternalEnv{..} token msg = atomically $
+  sendCommand (TaskEnd token msg)
 
 
-sendMessageIO :: Internal -> Message -> IO ()
-sendMessageIO i = atomically . sendMessage i
+withNew :: Config -> (forall t. Handle t -> IO a) -> IO a
+withNew cfg action
+  | enabled cfg = withNewEnabled cfg action
+  | otherwise   = action noOpHandle
 
 
-outputThread :: OutputEnv -> IO ()
-outputThread OutputEnv{..} = go mempty
+withNewEnabled :: Config -> (forall t. Handle t -> IO a) -> IO a
+withNewEnabled cfg action = do
+  -- NOTE: no need to use bracket for `create`, since we don't allocate
+  -- any lasting resources (we don't even have corresponding `destroy`)
+  (iEnv, oEnv) <- create cfg
+
+  withAsync (outputThread oEnv) $ \outputAsync -> do
+
+    let handle =
+          Handle{ reportStart = reportStart' iEnv
+                , reportEnd = reportEnd' iEnv
+                }
+
+    x <-
+      action handle
+      `onException` (sendCommandIO iEnv (Stop "Aborted.") >> wait outputAsync)
+
+    sendCommandIO iEnv (Stop "Complete.")
+    wait outputAsync
+
+    return x
+
+
+outputThread :: OutputThreadEnv -> IO ()
+outputThread OutputThreadEnv{..} = go mempty
   where
-    go :: Tasks -> IO ()
+    go :: IntMap TaskName -> IO ()
     go tasks = do
-      msg <- readMessage
-      handle msg tasks
+      cmd <- readCommand
+      handle cmd tasks
 
     handle (TaskStart token name) oldTasks = do
       let newTasks = IntMap.insert token name oldTasks
@@ -115,50 +153,24 @@ clearStatusLine = do
   clearLine
 
 
-putStatusLine :: String -> IntMap TaskName -> IO ()
-putStatusLine prefix tasksMap = do
+updateStatusLine :: String -> IntMap TaskName -> Maybe String -> IO ()
+updateStatusLine prefix tasksMap outputMay = do
+  clearStatusLine
+
+  case outputMay of
+    Just output -> putStrLn output
+    Nothing -> pure ()
+
   let tasks = map snd $ IntMap.toAscList tasksMap
   putStr ("| " <> prefix <> intercalate ", " tasks <> "...")
 
 
-updateStatusLine :: String -> IntMap TaskName -> Maybe String -> IO ()
-updateStatusLine prefix tasksMap outputMay = do
-  clearStatusLine
-  case outputMay of
-    Just output -> putStrLn output
-    Nothing -> pure ()
-  putStatusLine prefix tasksMap
-
-
-withProgressReporter :: String -> (forall t. ProgressReporter t -> IO a) -> IO a
-withProgressReporter statusLinePrefix action = do
-
-  (i, oEnv) <- create statusLinePrefix
-
-  withAsync (outputThread oEnv) $ \outputAsync -> do
-
-    let progressReporter =
-          ProgressReporter{ reportStart = reportStart' i
-                          , reportEnd = reportEnd' i
-                          }
-
-    x <-
-      action progressReporter
-      `onException` (sendMessageIO i (Stop "Aborted.") >> wait outputAsync)
-
-    sendMessageIO i (Stop "Complete.")
-    wait outputAsync
-
-    return x
-
-
-withProgressReporterIf :: Bool -> String -> (forall t. ProgressReporter t -> IO a) -> IO a
-withProgressReporterIf True statusLinePrefix action = withProgressReporter statusLinePrefix action
-withProgressReporterIf False _ action = action dummyProgressReporter
-
-
-dummyProgressReporter :: ProgressReporter ()
-dummyProgressReporter = ProgressReporter
+noOpHandle :: Handle ()
+noOpHandle = Handle
   { reportStart = \_ -> pure ()
   , reportEnd = \_ _ -> pure ()
   }
+
+
+sendCommandIO :: InternalEnv -> Command -> IO ()
+sendCommandIO iEnv = atomically . sendCommand iEnv

@@ -41,7 +41,7 @@ import qualified Data.Text.IO
 
 -- vampire-proof-check
 import qualified Data.Range as Range
-import ProgressReporter
+import qualified ProgressReporter
 import VampireProofCheck.Options
 import VampireProofCheck.Parser (parseProof)
 import VampireProofCheck.Types
@@ -113,18 +113,24 @@ checkProof opts@Options{..} proof@Proof{..} = do
   -- Ideally we'd use a fixed pool of worker threads instead, but it's not a big problem here.)
   workerLimitSem <- newQSem (max 1 optNumWorkers)
 
+  let prCfg = ProgressReporter.Config
+        { enabled = optVerbose
+        , statusLinePrefix = "Checking statements: "
+        }
+
   checkedStatements <-
-    withProgressReporterIf optVerbose "Checking statements: " $ \ProgressReporter{..} ->
+    ProgressReporter.withNew prCfg $ \pr ->
       forConcurrently idsToCheck $ \stmtId ->
         bracket_ (waitQSem workerLimitSem) (signalQSem workerLimitSem) $ do
-          tok <- reportStart (show stmtId)
+          tok <- ProgressReporter.reportStart pr (show stmtId)
 
           CheckResult{..} <- checkStatementId opts proof stmtId
 
-          reportEnd tok ("Statement " <> showIdPadded stmtId <> ": "
-                         <> showResultMark crState
-                         <> maybe "" showReason crReason
-                         <> maybe "" showStats crStats)
+          ProgressReporter.reportEnd pr tok $
+            "Statement " <> showIdPadded stmtId <> ": "
+            <> showResultMark crState
+            <> maybe "" showReason crReason
+            <> maybe "" showStats crStats
 
           case crState of
             StatementTrue ->
