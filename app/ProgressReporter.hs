@@ -13,10 +13,13 @@ module ProgressReporter
 
 -- base
 import Control.Exception (onException)
+import Control.Monad (when)
 import Data.List (intercalate)
+import System.IO (hPutStrLn, hPutStr)
+import qualified System.IO
 
 -- ansi-terminal
-import System.Console.ANSI (setCursorColumn, clearLine)
+import System.Console.ANSI (hClearLine, hSetCursorColumn, hSupportsANSI)
 
 -- async
 import Control.Concurrent.Async (withAsync, wait)
@@ -35,6 +38,8 @@ data Config = Config
     -- ^ If enabled is False, a no-op ProgressReporter will be used.
   , statusLinePrefix :: !String
     -- ^ The prefix is printed on the status line before the list of tasks in progress.
+  , outputHandle :: !System.IO.Handle
+    -- ^ The progress messages will be printed to this handle (usually stdout or stderr).
   }
 
 
@@ -54,8 +59,10 @@ data InternalEnv = InternalEnv
 
 
 data OutputThreadEnv = OutputThreadEnv
-  { statusLinePrefix :: !String
-  , readCommand :: !(IO Command)
+  { readCommand :: !(IO Command)
+  , statusLinePrefix :: !String
+  , outputHandle :: !System.IO.Handle
+  , useStatusLine :: !Bool
   }
 
 
@@ -75,6 +82,7 @@ create Config{..} = do
       readCommand = atomically $ readTChan cmdChan
   nextTokenVar <- newTVarIO 1
   let getNextToken = readTVar nextTokenVar <* modifyTVar' nextTokenVar (+1)
+  useStatusLine <- hSupportsANSI outputHandle
   return (InternalEnv{..}, OutputThreadEnv{..})
 
 
@@ -129,40 +137,36 @@ outputThread OutputThreadEnv{..} = go mempty
 
     handle (TaskStart token name) oldTasks = do
       let newTasks = IntMap.insert token name oldTasks
-      updateStatusLine statusLinePrefix newTasks Nothing
+      when useStatusLine $
+        updateStatusLine newTasks Nothing
       go newTasks
 
     handle (TaskEnd token msg) oldTasks = do
       let newTasks = IntMap.delete token oldTasks
-      updateStatusLine statusLinePrefix newTasks (Just msg)
+      if useStatusLine
+        then updateStatusLine newTasks (Just msg)
+        else hPutStrLn outputHandle msg
       go newTasks
 
-    -- handle (PrintLine msg) tasks = do
-    --   updateStatusLine statusLinePrefix tasks (Just msg)
-    --   go tasks
-
     handle (Stop msg) _ = do
-      clearStatusLine
-      putStrLn msg
+      when useStatusLine clearStatusLine
+      hPutStrLn outputHandle msg
       -- NOTE: No call to `go` since we want to stop here.
 
+    clearStatusLine :: IO ()
+    clearStatusLine = do
+      hSetCursorColumn outputHandle 0
+      hClearLine outputHandle
 
-clearStatusLine :: IO ()
-clearStatusLine = do
-  setCursorColumn 0
-  clearLine
-
-
-updateStatusLine :: String -> IntMap TaskName -> Maybe String -> IO ()
-updateStatusLine prefix tasksMap outputMay = do
-  clearStatusLine
-
-  case outputMay of
-    Just output -> putStrLn output
-    Nothing -> pure ()
-
-  let tasks = map snd $ IntMap.toAscList tasksMap
-  putStr ("| " <> prefix <> intercalate ", " tasks <> "...")
+    updateStatusLine :: IntMap TaskName -> Maybe String -> IO ()
+    updateStatusLine tasksMap outputMay = do
+      clearStatusLine
+      case outputMay of
+        Just output -> hPutStrLn outputHandle output
+        Nothing -> pure ()
+      let tasks = map snd $ IntMap.toAscList tasksMap
+          statusLine = "| " <> statusLinePrefix <> intercalate ", " tasks <> "..."
+      hPutStr outputHandle statusLine
 
 
 noOpHandle :: Handle ()

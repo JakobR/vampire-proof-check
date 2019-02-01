@@ -14,4 +14,3 @@
   If it's unsatisfiable, print a warning that the inference is trivial
   (but not an error, since it's still a valid inference).
   Of course it's not decidable, but it might still help to catch some mistakes.
-* TODO When output is not a terminal, skip the status line (in module =ProgressReporter=)

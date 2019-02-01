@@ -116,6 +116,7 @@ checkProof opts@Options{..} proof@Proof{..} = do
   let prCfg = ProgressReporter.Config
         { enabled = optVerbose
         , statusLinePrefix = "Checking statements: "
+        , outputHandle = stdout
         }
 
   checkedStatements <-
