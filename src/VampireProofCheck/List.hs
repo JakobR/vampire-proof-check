@@ -6,7 +6,7 @@ module VampireProofCheck.List
   ) where
 
 -- base
-import Data.List ( sort )
+import Data.List (sort)
 
 
 hasDuplicates :: forall a . Ord a => [a] -> Bool

@@ -7,9 +7,9 @@ module Data.Range
   ) where
 
 -- base
-import Control.Applicative ( (<|>) )
-import Data.Bifunctor ( first )
-import Data.Void ( Void )
+import Control.Applicative ((<|>))
+import Data.Bifunctor (first)
+import Data.Void (Void)
 
 -- megaparsec
 import qualified Text.Megaparsec as MP
@@ -17,7 +17,7 @@ import qualified Text.Megaparsec.Char as MP
 import qualified Text.Megaparsec.Char.Lexer as MPL
 
 -- parser-combinators
-import Control.Applicative.Combinators ( sepBy )
+import Control.Applicative.Combinators (sepBy)
 
 
 

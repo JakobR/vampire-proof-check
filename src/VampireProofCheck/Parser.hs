@@ -7,11 +7,10 @@ module VampireProofCheck.Parser
   ) where
 
 -- base
-import Control.Applicative ( empty, (<|>), many )
-import Data.Char ( isAlpha, isSpace )
-import Data.Either ( partitionEithers )
-import Data.Maybe ( fromMaybe )
-import Data.Void ( Void )
+import Control.Applicative (empty, (<|>), many)
+import Data.Char (isAlpha, isSpace)
+import Data.Either (partitionEithers)
+import Data.Void (Void)
 
 -- containers
 import qualified Data.Map.Strict as Map
@@ -19,24 +18,24 @@ import qualified Data.Map.Strict as Map
 -- megaparsec
 import Text.Megaparsec
   ( initialPos, eof, errorBundlePretty
-  , parse, SourcePos, Parsec, (<?>), takeWhile1P
+  , parse, SourcePos(..), Parsec, (<?>), takeWhile1P
   , State(..), PosState(..), updateParserState
   )
-import Text.Megaparsec.Char ( space1 )
+import Text.Megaparsec.Char (space1)
 import qualified Text.Megaparsec.Char.Lexer as L
 
 -- mtl
-import Control.Monad.Except ( MonadError(..) )
+import Control.Monad.Except (MonadError(..))
 
 -- parser-combinators
-import Control.Applicative.Combinators ( sepBy )
+import Control.Applicative.Combinators (sepBy)
 
 -- text
-import Data.Text ( Text )
+import Data.Text (Text)
 import qualified Data.Text as Text
 
 -- vampire-proof-check
-import VampireProofCheck.List ( findDuplicate )
+import VampireProofCheck.List (findDuplicate)
 import VampireProofCheck.Types
 
 
@@ -114,7 +113,7 @@ parseProof'
   -> Text
   -> m Proof
 parseProof' pos str =
-  case parse p "" str of
+  case parse p (sourceName pos) str of
     Left err -> throwError $ errorBundlePretty err
     Right x -> return x
   where
@@ -127,7 +126,7 @@ parseProof' pos str =
 
 parseProof
   :: MonadError String m
-  => Maybe FilePath  -- ^ name of source file
-  -> Text            -- ^ text to parse
+  => String  -- ^ name of source file
+  -> Text    -- ^ text to parse
   -> m Proof
-parseProof srcName = parseProof' (initialPos $ fromMaybe "<string>" srcName)
+parseProof srcName = parseProof' (initialPos srcName)

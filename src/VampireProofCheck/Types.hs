@@ -15,10 +15,10 @@ module VampireProofCheck.Types
   ) where
 
 -- containers
-import Data.Map.Strict ( Map )
+import Data.Map.Strict (Map)
 
 -- text
-import Data.Text ( Text )
+import Data.Text (Text)
 
 
 -- | SMTLib expressions (Lisp-like S-Expressions)

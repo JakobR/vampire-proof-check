@@ -11,6 +11,7 @@ import Control.Exception (bracket_, Exception)
 import Control.Monad (forM_, when, unless)
 import Data.Char (isSpace)
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Data.Typeable (Typeable)
 import System.Exit (exitSuccess)
 import System.IO (hPrint, hSetBuffering, stderr, stdout, BufferMode(..))
@@ -59,7 +60,7 @@ main = do
 
   proof <-
     liftEitherWith (fatalError . ("unable to parse input:\n"++)) $
-    parseProof optProofFile input
+    parseProof (fromMaybe "<stdin>" optProofFile) input
 
   -- Create output directory if it doesn't exist already
   whenJust optVampireOutputDir (createDirectoryIfMissing True)
