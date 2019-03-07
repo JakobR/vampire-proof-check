@@ -100,13 +100,14 @@ optionsParser numProcessors =
       <> long "continue-on-unproved"
       <> help ("When a proof step cannot be proved due to a timeout "
                ++ "or because it does not hold, "
-               ++ "continue checking the subsequent inferences.")
+               ++ "continue checking the remaining inferences "
+               ++ "instead of terminating with an error.")
 
     continueOnErrorFlag =
       switch $
       long "continue-on-error"
       <> help ("When a proof step fails due to a vampire error, "
-               ++ "continue checking the subsequent inferences.")
+               ++ "continue checking the remaining inferences.")
 
     numWorkers =
       option auto $
@@ -114,7 +115,7 @@ optionsParser numProcessors =
       <> long "num-workers"
       <> value numProcessors
       <> showDefault
-      <> help "How many vampire instances to run in parallel"
+      <> help "The number of vampire instances to run in parallel"
 
     verboseFlag =
       switch $
