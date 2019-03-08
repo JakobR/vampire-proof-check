@@ -10,6 +10,7 @@ module VampireProofCheck.Parser
 import Control.Applicative (empty, (<|>), many)
 import Data.Char (isAlpha, isSpace)
 import Data.Either (partitionEithers)
+import Data.List (intercalate)
 import Data.Void (Void)
 
 -- containers
@@ -17,7 +18,7 @@ import qualified Data.Map.Strict as Map
 
 -- megaparsec
 import Text.Megaparsec
-  ( initialPos, eof, errorBundlePretty
+  (setOffset,  initialPos, eof, errorBundlePretty
   , parse, SourcePos(..), Parsec, (<?>), takeWhile1P
   , State(..), PosState(..), updateParserState
   )
@@ -35,6 +36,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 
 -- vampire-proof-check
+import qualified Data.DependencyGraph as DependencyGraph
 import VampireProofCheck.List (findDuplicate)
 import VampireProofCheck.Types
 
@@ -77,7 +79,7 @@ declP = Decl <$> sexpr
 formulaP :: Parser Formula
 formulaP = Formula <$> sexpr
 
-statementP :: Parser (Id, Statement)
+statementP :: Parser ParsedStatement
 statementP = do
   stmtId <- idP <* symbol "."
   conclusion <- formulaP
@@ -101,8 +103,24 @@ proofP = do
   case findDuplicate ids of
     Just dupId -> fail $ "duplicate id: " <> show dupId
     Nothing -> return ()
-  let proofStatements = Map.fromList stmts
-  return Proof{..}
+  -- TODO: Using "fail" doesn't give us good error locations.
+  -- We should annotate statements with their source locations:
+  -- make a combinator @located :: Parser a -> Parser (Ann Span a)@ or something like that,
+  -- and use @located statementP@ in this function.
+  -- Then, when we encounter an error we should set the source location to the corresponding
+  -- statement's location (even better: the position where the erroneous premise is indicated;
+  -- so: we use a @Parser (Ann Span (Id, StatementF (Ann Span Id)))@, or what also works
+  -- would be a @Parser (Ann Span Id, StatementF (Ann Span Id))@.)
+  case DependencyGraph.resolve (Map.fromList stmts) of
+    Left (DependencyGraph.Missing i j) ->
+      fail $ "statement " <> show j <> " depends on non-existing premise " <> show i
+    Left (DependencyGraph.Cycle js) ->
+      fail $ "circular dependency between statements: " <> intercalate " -> " (show <$> js ++ take 1 js)
+    Right proofStatements ->
+      return Proof{..}
+
+failAt :: Int -> String -> Parser a
+failAt o msg = setOffset o >> fail msg
 
 setPosition :: SourcePos -> Parser ()
 setPosition pos = updateParserState $ \s -> s{statePosState = (statePosState s){ pstateSourcePos = pos }}

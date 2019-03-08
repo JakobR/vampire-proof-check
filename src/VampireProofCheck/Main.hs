@@ -196,28 +196,10 @@ checkStatementId opts Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
       fatalError ("id doesn't appear in proof: " <> show checkId)
-    Just (Axiom _) ->
+    Just (Fix (Axiom _)) ->
       -- Nothing to check for axioms
       return $ CheckResult StatementTrue "axiom" Nothing
-    Just (Inference conclusion premiseIds) -> do
-      -- Inference may only depend on earlier statements
-      -- (this is just a simple way to enforce that the dependency graph is acyclic)
-      case filter (>= checkId) premiseIds of
-        [] -> return ()
-        xs -> fatalError ("inference " <> show checkId
-                          <> " may only depends on earlier formulas, but depends on "
-                          <> intercalate ", " (show <$> xs))
-
-      -- Look up premises and fail if one doesn't exist
-      let
-        lookupId :: Id -> Either Id Statement
-        lookupId theId = maybe (Left theId) Right (proofStatements Map.!? theId)
-
-        throwLookupError errId = fatalError ("inference " <> show checkId
-                                             <> " depends on non-existing premise " <> show errId)
-
-      premises <- liftEitherWith throwLookupError $ sequence (lookupId <$> premiseIds)
-
+    Just (Fix (Inference conclusion premises)) ->
       checkImplication opts (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
 
 

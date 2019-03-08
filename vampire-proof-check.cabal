@@ -36,6 +36,7 @@ library
                   , clock
                   , containers
                   , deepseq
+                  , deriving-compat
                   , directory
                   , exceptions
                   , filepath
