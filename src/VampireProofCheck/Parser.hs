@@ -10,6 +10,7 @@ module VampireProofCheck.Parser
 import Control.Applicative (empty, (<|>), many)
 import Data.Char (isAlpha, isSpace)
 import Data.Either (partitionEithers)
+import Data.Function (on)
 import Data.List (intercalate)
 import Data.Void (Void)
 
@@ -18,7 +19,7 @@ import qualified Data.Map.Strict as Map
 
 -- megaparsec
 import Text.Megaparsec
-  (setOffset,  initialPos, eof, errorBundlePretty
+  (getOffset, setOffset,  initialPos, eof, errorBundlePretty
   , parse, SourcePos(..), Parsec, (<?>), takeWhile1P
   , State(..), PosState(..), updateParserState
   )
@@ -31,13 +32,16 @@ import Control.Monad.Except (MonadError(..))
 -- parser-combinators
 import Control.Applicative.Combinators (sepBy)
 
+-- safe
+import Safe (headMay)
+
 -- text
 import Data.Text (Text)
 import qualified Data.Text as Text
 
 -- vampire-proof-check
 import qualified Data.DependencyGraph as DependencyGraph
-import VampireProofCheck.List (findDuplicate)
+import VampireProofCheck.List (findDuplicate')
 import VampireProofCheck.Types
 
 
@@ -79,12 +83,12 @@ declP = Decl <$> sexpr
 formulaP :: Parser Formula
 formulaP = Formula <$> sexpr
 
-statementP :: Parser ParsedStatement
+statementP :: Parser (Ann Offset Id, StatementF (Ann Offset Id))
 statementP = do
-  stmtId <- idP <* symbol "."
+  stmtId <- located idP <* symbol "."
   conclusion <- formulaP
   let wordP = lexemeNamed "premise-word" $ takeWhile1P Nothing isAlpha
-      premise = (Right <$> idP) <|> (Left <$> wordP)
+      premise = (Right <$> located idP) <|> (Left <$> wordP)
   premises <- symbol "[" *> sepBy premise (symbol ",") <* symbol "]"
   let stmt' = case premises of
                 [ Left "axiom" ] -> Right $ Axiom conclusion
@@ -95,32 +99,54 @@ statementP = do
     Left err -> fail err
     Right stmt -> return (stmtId, stmt)
 
+data Ann ann a = Ann
+  { annotation :: !ann
+  , payload :: !a
+  }
+
+-- | NOTE: compares only the payload!
+instance Eq a => Eq (Ann ann a) where
+  (==) = (==) `on` payload
+
+-- | NOTE: compares only the payload!
+instance Ord a => Ord (Ann ann a) where
+  compare = compare `on` payload
+
+newtype Offset = Offset Int
+
+located :: Parser a -> Parser (Ann Offset a)
+located p = do
+  o <- getOffset
+  x <- p
+  return (Ann (Offset o) x)
+
 proofP :: Parser Proof
 proofP = do
   let line = (Left <$> declP) <|> (Right <$> statementP)
-  (proofDeclarations, stmts) <- partitionEithers <$> many line
-  let ids = fst <$> stmts
-  case findDuplicate ids of
-    Just dupId -> fail $ "duplicate id: " <> show dupId
+  (proofDeclarations, annStmts) <- partitionEithers <$> many line
+
+  case findDuplicate' (fst <$> annStmts) of
+    Just (_, Ann o dupId) -> failAt o $ "duplicate id: " <> show dupId
     Nothing -> return ()
-  -- TODO: Using "fail" doesn't give us good error locations.
-  -- We should annotate statements with their source locations:
-  -- make a combinator @located :: Parser a -> Parser (Ann Span a)@ or something like that,
-  -- and use @located statementP@ in this function.
-  -- Then, when we encounter an error we should set the source location to the corresponding
-  -- statement's location (even better: the position where the erroneous premise is indicated;
-  -- so: we use a @Parser (Ann Span (Id, StatementF (Ann Span Id)))@, or what also works
-  -- would be a @Parser (Ann Span Id, StatementF (Ann Span Id))@.)
-  case DependencyGraph.resolve (Map.fromList stmts) of
-    Left (DependencyGraph.Missing i j) ->
-      fail $ "statement " <> show j <> " depends on non-existing premise " <> show i
-    Left (DependencyGraph.Cycle js) ->
-      fail $ "circular dependency between statements: " <> intercalate " -> " (show <$> js ++ take 1 js)
-    Right proofStatements ->
+
+  case DependencyGraph.resolve (Map.fromList annStmts) of
+    Left (DependencyGraph.Missing (Ann o i) (Ann _ j)) ->
+      failAt o $ "statement " <> show j <> " depends on non-existing premise " <> show i
+    Left (DependencyGraph.Cycle ann_js) -> do
+      let js = payload <$> ann_js
+          jcycle = js ++ take 1 js
+          o = annotation <$> headMay ann_js
+      failAtMay o $ "circular dependency between statements: " <> intercalate " -> " (show <$> jcycle)
+    Right annProofStatements -> do
+      let proofStatements = Map.mapKeysMonotonic payload annProofStatements
       return Proof{..}
 
-failAt :: Int -> String -> Parser a
-failAt o msg = setOffset o >> fail msg
+failAt :: Offset -> String -> Parser a
+failAt (Offset o) msg = setOffset o >> fail msg
+
+failAtMay :: Maybe Offset -> String -> Parser a
+failAtMay (Just o) = failAt o
+failAtMay Nothing = fail
 
 setPosition :: SourcePos -> Parser ()
 setPosition pos = updateParserState $ \s -> s{statePosState = (statePosState s){ pstateSourcePos = pos }}

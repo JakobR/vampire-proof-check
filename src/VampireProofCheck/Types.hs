@@ -11,7 +11,6 @@ module VampireProofCheck.Types
   , Formula(..)
   , Id(..)
   , StatementF(..)
-  , ParsedStatement
   , Statement
   , Fix(..)
   , isAxiomF
@@ -68,10 +67,6 @@ data StatementF a
 
 $(deriveShow1 ''StatementF)
 
--- What the parser returns
-type ParsedStatement = (Id, StatementF Id)
-
--- What the program wants to work with
 type Statement = Fix StatementF
 
 isAxiomF :: StatementF a -> Bool
