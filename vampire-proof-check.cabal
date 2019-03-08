@@ -23,10 +23,12 @@ library
   import:           warnings
   exposed-modules:  Data.DependencyGraph
                   , Data.Range
+                  , System.Console.ProgressReporter
+                  , VampireProofCheck.Main
+                  , VampireProofCheck.Options
                   , VampireProofCheck.Parser
                   , VampireProofCheck.Types
                   , VampireProofCheck.Vampire
-                  , System.Console.ProgressReporter
   other-modules:    VampireProofCheck.List
   build-depends:    base >=4.11 && <5
                   , ansi-terminal
@@ -34,8 +36,12 @@ library
                   , clock
                   , containers
                   , deepseq
+                  , directory
+                  , exceptions
+                  , filepath
                   , megaparsec
                   , mtl
+                  , optparse-applicative
                   , parser-combinators
                   , process
                   , recursion-schemes
@@ -48,21 +54,8 @@ library
 
 executable vampire-proof-check
   import:           warnings
-  other-modules:    VampireProofCheck.Options
-  build-depends:    base >=4.11 && <5
+  build-depends:    base
                   , vampire-proof-check
-                  , ansi-terminal
-                  , async
-                  , containers
-                  , directory
-                  , exceptions
-                  , filepath
-                  , mtl
-                  , optparse-applicative
-                  , safe
-                  , text
-                  , time
-                  , stm
   main-is:          Main.hs
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N
   hs-source-dirs:   app
