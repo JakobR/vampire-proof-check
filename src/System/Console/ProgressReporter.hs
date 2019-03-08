@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 
-module ProgressReporter
+module System.Console.ProgressReporter
   ( Config(..)
   , Handle
   , reportStart

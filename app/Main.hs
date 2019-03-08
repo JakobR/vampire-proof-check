@@ -42,7 +42,7 @@ import qualified Data.Text.IO
 
 -- vampire-proof-check
 import qualified Data.Range as Range
-import qualified ProgressReporter
+import qualified System.Console.ProgressReporter as ProgressReporter
 import VampireProofCheck.Options
 import VampireProofCheck.Parser (parseProof)
 import VampireProofCheck.Types
