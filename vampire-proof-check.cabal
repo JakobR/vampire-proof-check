@@ -70,7 +70,9 @@ test-suite vampire-proof-check-tests
   other-modules:    Data.DependencyGraphSpec
   build-depends:    base
                   , vampire-proof-check
+                  , async
                   , containers
+                  , deepseq
                   , deriving-compat
                   , hspec
                   , hspec-discover
