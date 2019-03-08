@@ -3,6 +3,7 @@
 
 module VampireProofCheck.Main
   ( main
+  , mainWith
   ) where
 
 -- base
@@ -53,7 +54,12 @@ import VampireProofCheck.Vampire
 main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
-  opts@Options{..} <- execOptionsParser
+  opts <- execOptionsParser
+  mainWith opts
+
+
+mainWith :: Options -> IO ()
+mainWith opts@Options{..} = do
   when optDebug $ hPrint stderr opts
 
   input <- readInput optProofFile
