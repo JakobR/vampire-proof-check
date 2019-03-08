@@ -131,7 +131,7 @@ checkProof opts@Options{..} proof@Proof{..} = do
           ProgressReporter.reportEnd pr tok $
             "Statement " <> showIdPadded stmtId <> ": "
             <> showResultMark crState
-            <> maybe "" showReason crReason
+            <> showReason crReason
             <> maybe "" showStats crStats
 
           case crState of
@@ -142,7 +142,7 @@ checkProof opts@Options{..} proof@Proof{..} = do
               fatalError $ "statement " <> show stmtId <> " does not hold!"
             StatementTimeout ->
               unless optContinueOnUnproved $
-              fatalError $ "while checking statement " <> show stmtId <> ": " <> maybe "timeout(?)" id crReason
+              fatalError $ "while checking statement " <> show stmtId <> ": " <> crReason
             StatementError err ->
               unless optContinueOnError $
               fatalError $ "while checking statement " <> show stmtId <> ": vampire error:" <> err
@@ -176,7 +176,7 @@ data StatementState
 
 data CheckResult = CheckResult
   { crState :: !StatementState
-  , crReason :: !(Maybe String)  -- ^ optional reason to print in [brackets] after the result mark
+  , crReason :: !String  -- ^ optional reason to print in [brackets] after the result mark
   , crStats :: !(Maybe VampireStats)
   }
 
@@ -192,7 +192,7 @@ checkStatementId opts Proof{..} checkId =
       fatalError ("id doesn't appear in proof: " <> show checkId)
     Just (Axiom _) ->
       -- Nothing to check for axioms
-      return $ CheckResult StatementTrue (Just "axiom") Nothing
+      return $ CheckResult StatementTrue "axiom" Nothing
     Just (Inference conclusion premiseIds) -> do
       -- Inference may only depend on earlier statements
       -- (this is just a simple way to enforce that the dependency graph is acyclic)
@@ -230,15 +230,15 @@ checkImplication opts@Options{..} outputName decls premises conclusion = do
 
   return $ case vampireResult of
     Refutation ->
-      CheckResult StatementTrue Nothing (Just vampireStats)
+      CheckResult StatementTrue "proof" (Just vampireStats)
     Satisfiable ->
-      CheckResult StatementFalse Nothing (Just vampireStats)
+      CheckResult StatementFalse "sat" (Just vampireStats)
     Unknown Timeout ->
-      CheckResult StatementTimeout (Just "timeout") (Just vampireStats)
+      CheckResult StatementTimeout "timeout" (Just vampireStats)
     Unknown IncompleteStrategy ->
-      CheckResult StatementTimeout (Just "incomplete strategy") (Just vampireStats)
+      CheckResult StatementTimeout "incomplete strategy" (Just vampireStats)
     Unknown (Error msg) ->
-      CheckResult (StatementError msg) (Just "error") (Just vampireStats)
+      CheckResult (StatementError msg) "error" (Just vampireStats)
 
 
 checkExprs
