@@ -91,11 +91,12 @@ statementP = do
       premise = (Right <$> located idP) <|> (Left <$> wordP)
   premises <- symbol "[" *> sepBy premise (symbol ",") <* symbol "]"
   let stmt' = case premises of
-                [ Left "axiom" ] -> Right $ Axiom conclusion
+                [ Left "axiom" ] -> Right $ AxiomF conclusion
                 ps -> case sequenceA ps of
                         Left txt -> Left $ "unexpected: " <> Text.unpack txt
-                        Right premiseIds -> Right $ Inference conclusion premiseIds
+                        Right premiseIds -> Right $ InferenceF conclusion premiseIds
   case stmt' of
+    -- TODO: set proper error location
     Left err -> fail err
     Right stmt -> return (stmtId, stmt)
 

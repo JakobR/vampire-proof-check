@@ -49,12 +49,6 @@ data ThingF a = Thing String [a]
   deriving anyclass NFData
   deriving anyclass NFData1
 
--- -- Orphan instances for tests
--- deriving stock instance Generic (Error k)
--- deriving anyclass instance NFData k => NFData (Error k)
--- deriving stock instance Generic (Fix f)
--- deriving anyclass instance (forall x. NFData x => NFData (f x)) => NFData (Fix f)
-
 $(deriveEq1 ''ThingF)
 $(deriveShow1 ''ThingF)
 

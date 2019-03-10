@@ -1,8 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Data.DependencyGraph
   ( Error(..)
   , resolve
+  , resolveFix
   ) where
 
 -- base
@@ -19,17 +21,24 @@ import qualified Data.Set as Set
 import Control.Monad.Except (lift, ExceptT, runExceptT, withExceptT, throwError)
 
 -- recursion-schemes
-import Data.Functor.Foldable (Fix(..))
+import Data.Functor.Foldable (Base, Corecursive, refix, Fix(..))
 
 
 -- | Resolve a directed acyclic dependency graph.
 resolve
+  :: forall f k t. (Traversable f, Ord k, Corecursive t, Base t ~ f)
+  => Map k (f k)
+  -> Either (Error k) (Map k t)
+resolve = fmap (fmap refix) . resolveFix
+{-# INLINABLE resolve #-}
+
+resolveFix
   :: forall f k. (Traversable f, Ord k)
   => Map k (f k)
      -- NOTE: an advantage of taking a Map as input is that we don't
      -- have to worry about duplicate keys in the input.
   -> Either (Error k) (Map k (Fix f))
-resolve input = runST $ do
+resolveFix input = runST $ do
   refs :: Map k (STRef s (ResolveState f k)) <-
     sequence $ (newSTRef . Todo) <$> input
 
@@ -56,7 +65,7 @@ resolve input = runST $ do
             Just ref -> resolveOne visited i ref
 
   runExceptT . withExceptT fromInternal $ Map.traverseWithKey (resolveOne Set.empty) refs
-{-# INLINABLE resolve #-}
+{-# INLINABLE resolveFix #-}
 
 data ResolveState f k
   = Ok !(Fix f)

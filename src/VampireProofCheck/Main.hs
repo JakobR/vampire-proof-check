@@ -196,11 +196,11 @@ checkStatementId opts Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
       fatalError ("id doesn't appear in proof: " <> show checkId)
-    Just (Fix (Axiom _)) ->
+    Just (Axiom _) ->
       -- Nothing to check for axioms
       return $ CheckResult StatementTrue "axiom" Nothing
-    Just (Fix (Inference conclusion premises)) ->
-      checkImplication opts (show checkId) proofDeclarations (stmtConclusion <$> premises) conclusion
+    Just (Inference conclusion premises) ->
+      checkImplication opts (show checkId) proofDeclarations (stmtFormula <$> premises) conclusion
 
 
 checkImplication

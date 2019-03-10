@@ -1,9 +1,12 @@
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module VampireProofCheck.Types
   ( Expr(..)
@@ -11,18 +14,20 @@ module VampireProofCheck.Types
   , Formula(..)
   , Id(..)
   , StatementF(..)
-  , Statement
-  , Fix(..)
+  , Statement(..)
   , isAxiomF
   , isAxiom
   , isInferenceF
   , isInference
-  , stmtConclusionF
-  , stmtConclusion
+  , stmtFormulaF
+  , stmtFormula
   , stmtPremisesF
   , stmtPremises
   , Proof(..)
   ) where
+
+-- base
+import GHC.Generics (Generic)
 
 -- containers
 import Data.Map.Strict (Map)
@@ -31,7 +36,7 @@ import Data.Map.Strict (Map)
 import Text.Show.Deriving (deriveShow1)
 
 -- recursion-schemes
-import Data.Functor.Foldable (unfix, Fix(..))
+import Data.Functor.Foldable (Base, Recursive, Corecursive, project)
 
 -- text
 import Data.Text (Text)
@@ -41,64 +46,73 @@ import Data.Text (Text)
 data Expr a
   = Value !a
   | SExpr ![Expr a]
-  deriving (Eq, Show, Functor)
+  deriving stock (Eq, Show, Functor)
 
 -- | Type declarations of constants, functions, ...
 newtype Declaration = Decl { unDecl :: Expr Text }
-  deriving (Show)
+  deriving stock Show
 
 -- | A first-order formula
 newtype Formula = Formula { unFormula :: Expr Text }
-  deriving (Show)
+  deriving stock Show
 
 -- | Id of a statement
 newtype Id = Id { unId :: Integer }
-  deriving (Eq, Ord)
-  deriving newtype (Show)
+  deriving stock (Eq, Ord)
+  deriving newtype Show
 
 -- | A statement of the proof (axiom or inferred from previous statements).
 -- Note that @Inference f []@ states that @f@ is a tautology (and that
 -- vampire should check this), which is different from @Axiom f@ (which
 -- simply asserts @f@ without checking it).
 data StatementF a
-  = Axiom !Formula
-  | Inference !Formula ![a]
-  deriving (Show, Functor, Foldable, Traversable)
+  = AxiomF !Formula
+  | InferenceF !Formula ![a]
+  deriving stock (Show, Generic, Functor, Foldable, Traversable)
 
 $(deriveShow1 ''StatementF)
 
-type Statement = Fix StatementF
+-- If the list were strict in its elements, circular dependencies would not be possible.
+-- TODO: investigate how we can use that.
+data Statement
+  = Axiom !Formula
+  | Inference !Formula ![Statement]
+  deriving stock (Show, Generic)
+  deriving anyclass (Recursive, Corecursive)
+
+type instance Base Statement = StatementF
 
 isAxiomF :: StatementF a -> Bool
-isAxiomF (Axiom _) = True
+isAxiomF (AxiomF _) = True
 isAxiomF _ = False
 
 isAxiom :: Statement -> Bool
-isAxiom = isAxiomF . unfix
+isAxiom = isAxiomF . project
 
 isInferenceF :: StatementF a -> Bool
-isInferenceF (Inference _ _) = True
+isInferenceF (InferenceF _ _) = True
 isInferenceF _ = False
 
 isInference :: Statement -> Bool
-isInference = isInferenceF . unfix
+isInference = isInferenceF . project
 
-stmtConclusionF :: StatementF a -> Formula
-stmtConclusionF (Axiom f) = f
-stmtConclusionF (Inference f _) = f
+stmtFormulaF :: StatementF a -> Formula
+stmtFormulaF (AxiomF f) = f
+stmtFormulaF (InferenceF f _) = f
 
-stmtConclusion :: Statement -> Formula
-stmtConclusion = stmtConclusionF . unfix
+-- | The formula derived by the given statement
+stmtFormula :: Statement -> Formula
+stmtFormula = stmtFormulaF . project
 
 stmtPremisesF :: StatementF a -> [a]
-stmtPremisesF (Axiom _) = []
-stmtPremisesF (Inference _ fs) = fs
+stmtPremisesF (AxiomF _) = []
+stmtPremisesF (InferenceF _ fs) = fs
 
 stmtPremises :: Statement -> [Statement]
-stmtPremises = stmtPremisesF . unfix
+stmtPremises = stmtPremisesF . project
 
 data Proof = Proof
   { proofDeclarations :: ![Declaration]
   , proofStatements :: !(Map Id Statement)
   }
-  deriving (Show)
+  deriving stock Show
