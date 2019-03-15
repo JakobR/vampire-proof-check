@@ -88,16 +88,15 @@ statementP = do
   stmtId <- located idP <* symbol "."
   conclusion <- formulaP
   let wordP = lexemeNamed "premise-word" $ takeWhile1P Nothing isAlpha
-      premise = (Right <$> located idP) <|> (Left <$> wordP)
+      premise = (Right <$> located idP) <|> (Left <$> located wordP)
   premises <- symbol "[" *> sepBy premise (symbol ",") <* symbol "]"
   let stmt' = case premises of
-                [ Left "axiom" ] -> Right $ AxiomF conclusion
+                [ Left (Ann _ "axiom") ] -> Right $ AxiomF conclusion
                 ps -> case sequenceA ps of
-                        Left txt -> Left $ "unexpected: " <> Text.unpack txt
+                        Left (Ann o txt) -> Left (o, "unexpected: " <> Text.unpack txt)
                         Right premiseIds -> Right $ InferenceF conclusion premiseIds
   case stmt' of
-    -- TODO: set proper error location
-    Left err -> fail err
+    Left (o, err) -> failAt o err
     Right stmt -> return (stmtId, stmt)
 
 data Ann ann a = Ann
@@ -137,7 +136,7 @@ proofP = do
       let js = payload <$> ann_js
           jcycle = js ++ take 1 js
           o = annotation <$> headMay ann_js
-      failAtMay o $ "circular dependency between statements: " <> intercalate " -> " (show <$> jcycle)
+      failAt' o $ "circular dependency between statements: " <> intercalate " -> " (show <$> jcycle)
     Right annProofStatements -> do
       let proofStatements = Map.mapKeysMonotonic payload annProofStatements
       return Proof{..}
@@ -145,9 +144,8 @@ proofP = do
 failAt :: Offset -> String -> Parser a
 failAt (Offset o) msg = setOffset o >> fail msg
 
-failAtMay :: Maybe Offset -> String -> Parser a
-failAtMay (Just o) = failAt o
-failAtMay Nothing = fail
+failAt' :: Maybe Offset -> String -> Parser a
+failAt' = maybe fail failAt
 
 setPosition :: SourcePos -> Parser ()
 setPosition pos = updateParserState $ \s -> s{statePosState = (statePosState s){ pstateSourcePos = pos }}
