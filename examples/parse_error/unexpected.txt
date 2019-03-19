@@ -1,2 +1,4 @@
 2. (= x 3) [axiom]
 5. (= x 2) [2,blah]
+
+;;;; vim: ft=lisp
