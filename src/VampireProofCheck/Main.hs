@@ -236,7 +236,7 @@ checkExprs
   -> IO (Result, VampireStats)
 checkExprs Options{..} outputName exprs = do
 
-  let vampireInput = intercalate "\n" (showExpr <$> exprs)
+  let vampireInput = unlines (showExpr <$> exprs)
       outputBasename = (</> outputName) <$> optVampireOutputDir
       additionalOptions = words optVampireOptions
 
