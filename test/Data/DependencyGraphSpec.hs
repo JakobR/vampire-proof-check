@@ -40,7 +40,7 @@ import Test.Hspec
 -- recursion-schemes
 import Data.Functor.Foldable (Fix(..))
 
--- vampire-proof-check
+-- vampire-tools
 import Data.DependencyGraph
 
 
@@ -54,7 +54,7 @@ $(deriveShow1 ''ThingF)
 
 
 resolveList :: [(Int, ThingF Int)] -> Either (Error Int) [(Int, Fix ThingF)]
-resolveList = fmap Map.toList . resolve . Map.fromList
+resolveList = fmap Map.toAscList . resolve . Map.fromList
 
 
 -- TODO: should use something like Benchmarkable in package criterion to ensure the computation
