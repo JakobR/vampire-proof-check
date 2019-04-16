@@ -1,5 +1,6 @@
 module VampireProofCheck.Options
   ( OptAssertNot(..)
+  , OptAssertTheory(..)
   , Options(..)
   , execOptionsParser
   ) where
@@ -21,6 +22,9 @@ import VampireProofCheck.Types (Id(..))
 data OptAssertNot = AvoidAssertNot | UseAssertNot
   deriving Show
 
+data OptAssertTheory = AvoidAssertTheory | UseAssertTheory
+  deriving Show
+
 
 data Options = Options
   { optVampireExe :: FilePath
@@ -33,6 +37,7 @@ data Options = Options
   , optNumWorkers :: Int
   , optVerbose :: Bool
   , optAssertNot :: OptAssertNot
+  , optAssertTheory :: OptAssertTheory
   , optProofFile :: Maybe FilePath
   , optDebug :: Bool
   }
@@ -52,6 +57,7 @@ optionsParser numProcessors =
   <*> numWorkers
   <*> verboseFlag
   <*> assertNot
+  <*> assertTheory
   <*> optional proofFile
   <*> debugFlag
 
@@ -126,8 +132,13 @@ optionsParser numProcessors =
     assertNot =
       flag UseAssertNot AvoidAssertNot $
       long "avoid-assert-not"
-      <> help ("Use (assert (not ...)) instead of (assert-not ...). "
+      <> help ("Use (assert (not ...)) for the conclusion instead of (assert-not ...). "
                ++ "Useful for vampire versions without smtlib_extras.")
+
+    assertTheory =
+      flag UseAssertTheory AvoidAssertTheory $
+      long "avoid-assert-theory"
+      <> help "Use (assert ...) for theory axioms instead of (assert-theory ...)."
 
     proofFile =
       argument str $

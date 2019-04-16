@@ -91,7 +91,9 @@ statementP = do
       premise = (Right <$> located idP) <|> (Left <$> located wordP)
   premises <- symbol "[" *> sepBy premise (symbol ",") <* symbol "]"
   let stmt' = case premises of
-                [ Left (Ann _ "axiom") ] -> Right $ AxiomF conclusion
+                [ Left (Ann _ "axiom") ] -> Right $ AxiomF conclusion Assumption  -- kept for backward compatibility
+                [ Left (Ann _ "assumption") ] -> Right $ AxiomF conclusion Assumption
+                [ Left (Ann _ "theory") ] -> Right $ AxiomF conclusion TheoryAxiom
                 ps -> case sequenceA ps of
                         Left (Ann o txt) -> Left (o, "unexpected: " <> Text.unpack txt)
                         Right premiseIds -> Right $ InferenceF conclusion premiseIds

@@ -13,6 +13,7 @@ module VampireProofCheck.Types
   , Declaration(..)
   , Formula(..)
   , Id(..)
+  , AxiomType(..)
   , StatementF(..)
   , Statement(..)
   , isAxiomF
@@ -61,21 +62,24 @@ newtype Id = Id { unId :: Integer }
   deriving stock (Eq, Ord)
   deriving newtype Show
 
+data AxiomType
+  = Assumption   -- ^ problem-specific assumptions from which we want to prove the conclusion
+  | TheoryAxiom  -- ^ theory axioms (handled specially in vampire)
+  deriving stock (Show)
+
 -- | A statement of the proof (axiom or inferred from previous statements).
 -- Note that @Inference f []@ states that @f@ is a tautology (and that
 -- vampire should check this), which is different from @Axiom f@ (which
 -- simply asserts @f@ without checking it).
 data StatementF a
-  = AxiomF !Formula
+  = AxiomF !Formula !AxiomType
   | InferenceF !Formula ![a]
   deriving stock (Show, Generic, Functor, Foldable, Traversable)
 
 $(deriveShow1 ''StatementF)
 
--- If the list were strict in its elements, circular dependencies would not be possible.
--- TODO: investigate how we can use that.
 data Statement
-  = Axiom !Formula
+  = Axiom !Formula !AxiomType
   | Inference !Formula ![Statement]
   deriving stock (Show, Generic)
   deriving anyclass (Recursive, Corecursive)
@@ -83,7 +87,7 @@ data Statement
 type instance Base Statement = StatementF
 
 isAxiomF :: StatementF a -> Bool
-isAxiomF (AxiomF _) = True
+isAxiomF (AxiomF _ _) = True
 isAxiomF _ = False
 
 isAxiom :: Statement -> Bool
@@ -97,7 +101,7 @@ isInference :: Statement -> Bool
 isInference = isInferenceF . project
 
 stmtFormulaF :: StatementF a -> Formula
-stmtFormulaF (AxiomF f) = f
+stmtFormulaF (AxiomF f _) = f
 stmtFormulaF (InferenceF f _) = f
 
 -- | The formula derived by the given statement
@@ -105,7 +109,7 @@ stmtFormula :: Statement -> Formula
 stmtFormula = stmtFormulaF . project
 
 stmtPremisesF :: StatementF a -> [a]
-stmtPremisesF (AxiomF _) = []
+stmtPremisesF (AxiomF _ _) = []
 stmtPremisesF (InferenceF _ fs) = fs
 
 stmtPremises :: Statement -> [Statement]

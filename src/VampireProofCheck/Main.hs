@@ -10,6 +10,7 @@ module VampireProofCheck.Main
 import Control.Concurrent.QSem
 import Control.Exception (bracket_, Exception)
 import Control.Monad (forM_, when, unless)
+import Data.Bifunctor (first)
 import Data.Char (isSpace)
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
@@ -196,23 +197,26 @@ checkStatementId opts Proof{..} checkId =
   case Map.lookup checkId proofStatements of
     Nothing ->
       fatalError ("id doesn't appear in proof: " <> show checkId)
-    Just (Axiom _) ->
+    Just (Axiom _ _) ->
       -- Nothing to check for axioms
       return $ CheckResult StatementTrue "axiom" Nothing
     Just (Inference conclusion premises) ->
-      checkImplication opts (show checkId) proofDeclarations (stmtFormula <$> premises) conclusion
+      let getPremise :: Statement -> (Formula, AxiomType)
+          getPremise (Axiom fm t) = (fm, t)
+          getPremise (Inference fm _) = (fm, Assumption)
+      in checkImplication opts (show checkId) proofDeclarations (getPremise <$> premises) conclusion
 
 
 checkImplication
   :: Options
-  -> String         -- ^ name for output file
-  -> [Declaration]  -- ^ additional declarations
-  -> [Formula]      -- ^ the premises
-  -> Formula        -- ^ the conclusion
+  -> String                  -- ^ name for output file
+  -> [Declaration]           -- ^ additional declarations
+  -> [(Formula, AxiomType)]  -- ^ the premises
+  -> Formula                 -- ^ the conclusion
   -> IO CheckResult
 checkImplication opts@Options{..} outputName decls premises conclusion = do
 
-  let exprs = exprsForImplicationCheck optAssertNot decls premises conclusion
+  let exprs = exprsForImplicationCheck optAssertNot optAssertTheory decls premises conclusion
 
   (vampireResult, vampireStats) <- checkExprs opts outputName exprs
 
@@ -253,8 +257,18 @@ checkExprs Options{..} outputName exprs = do
   return (vampireResult, vampireStats)
 
 
+assertPremise :: OptAssertTheory -> (Expr Text, AxiomType) -> Expr Text
+assertPremise opt (expr, TheoryAxiom) = assertTheoryExpr opt expr
+assertPremise _ (expr, Assumption) = assertExpr expr
+
+
 assertExpr :: Expr Text -> Expr Text
 assertExpr e = SExpr [ Value "assert", e ]
+
+
+assertTheoryExpr :: OptAssertTheory -> Expr Text -> Expr Text
+assertTheoryExpr UseAssertTheory expr = SExpr [ Value "assert-theory", expr ]
+assertTheoryExpr AvoidAssertTheory expr = assertExpr expr
 
 
 assertNotExpr :: OptAssertNot -> Expr Text -> Expr Text
@@ -263,14 +277,15 @@ assertNotExpr UseAssertNot expr = SExpr [ Value "assert-not", expr ]
 
 
 exprsForImplicationCheck
-  :: OptAssertNot   -- ^ whether to avoid assert-not statements
-  -> [Declaration]  -- ^ declarations
-  -> [Formula]      -- ^ premises
-  -> Formula        -- ^ conclusion
-  -> [Expr Text]    -- ^ SMT-LIB 2 expressions for implication check
-exprsForImplicationCheck optAssertNot decls premises conclusion =
+  :: OptAssertNot            -- ^ whether to avoid assert-not statements
+  -> OptAssertTheory         -- ^ whether to avoid assert-theory statements
+  -> [Declaration]           -- ^ declarations
+  -> [(Formula, AxiomType)]  -- ^ premises
+  -> Formula                 -- ^ conclusion
+  -> [Expr Text]             -- ^ SMT-LIB 2 expressions for implication check
+exprsForImplicationCheck optAssertNot optAssertTheory decls premises conclusion =
   (unDecl <$> decls)
-  <> (assertExpr . unFormula <$> premises)
+  <> (assertPremise optAssertTheory . first unFormula <$> premises)
   <> [assertNotExpr optAssertNot . unFormula $ conclusion]
 
 
