@@ -1,7 +1,7 @@
 cabal-version:      2.2
-name:               vampire-proof-check
+name:               vampire-tools
 version:            0.1.0.0
-synopsis:           A simple tool to check proofs with the vampire theorem prover
+synopsis:           Check proofs with the vampire theorem prover, and benchmark vampire runs
 -- description:
 license:            GPL-3.0-or-later
 license-file:       LICENSE
@@ -47,26 +47,36 @@ library
                   , process
                   , recursion-schemes
                   , safe
+                  , stm
                   , text
                   , time
-                  , stm
+                  , unix
   hs-source-dirs:   src
   default-language: Haskell2010
 
 executable vampire-proof-check
   import:           warnings
   build-depends:    base
-                  , vampire-proof-check
+                  , vampire-tools
   main-is:          Main.hs
   ghc-options:      -threaded -rtsopts -with-rtsopts=-N
-  hs-source-dirs:   app
+  hs-source-dirs:   app/proof-check
   default-language: Haskell2010
 
-test-suite vampire-proof-check-tests
+executable vampire-benchmark
+  import:           warnings
+  build-depends:    base
+                  , vampire-tools
+  main-is:          Main.hs
+  ghc-options:      -threaded -rtsopts -with-rtsopts=-N
+  hs-source-dirs:   app/benchmark
+  default-language: Haskell2010
+
+test-suite vampire-tools-tests
   import:           warnings
   other-modules:    Data.DependencyGraphSpec
   build-depends:    base
-                  , vampire-proof-check
+                  , vampire-tools
                   , async
                   , containers
                   , deepseq
