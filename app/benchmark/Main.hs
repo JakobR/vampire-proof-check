@@ -2,9 +2,9 @@ module Main
   ( main
   ) where
 
--- vampire-proof-check
--- import qualified VampireProofCheck.Main
+-- vampire-tools
+import qualified Vampire.Benchmark.Main
 
 
 main :: IO ()
-main = error "TODO"
+main = Vampire.Benchmark.Main.main
