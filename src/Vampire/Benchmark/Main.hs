@@ -39,6 +39,8 @@ import System.Process
 
 -- time
 import Data.Time.Clock (secondsToDiffTime, diffTimeToPicoseconds, picosecondsToDiffTime, DiffTime)
+import Data.Time.Format (formatTime)
+import Data.Time.LocalTime (getZonedTime)
 
 -- unagi-chan
 import qualified Control.Concurrent.Chan.Unagi as Unagi
@@ -176,13 +178,16 @@ processProblem options RunOptions{rOptVampireExe,rOptVampireOptions,rOptVampireW
              (threadDelay (diffTimeToMicroseconds $ rOptVampireTimeout + tolerance)
               >> terminateProcess process)  -- TODO: send SIGKILL in this case?
 
+      endTime <- formatTime (error "no time locale") "%0Y-%m-%d %H:%M:%S %Z" <$> getZonedTime
+      let msgPrefix = "[" <> endTime <> "] " <> problemName <> ": "
+
       case eExitcode of
         Left exitcode -> do
           writeFile (fromAbsFile $ problemExitcodeFile problem) (show (exitcodeToInt exitcode) <> "\n")
           -- TODO: Extract result to szs file
-          ProgressReporter.reportEnd pr token (problemName <> ": done")  -- TODO: more info
+          ProgressReporter.reportEnd pr token (msgPrefix <> "done")  -- TODO: more info
         Right () -> do
-          ProgressReporter.reportEnd pr token (problemName <> ": killed vampire because it got stuck")
+          ProgressReporter.reportEnd pr token (msgPrefix <> "killed vampire because it got stuck")
 
     _ ->
       error "impossible"
