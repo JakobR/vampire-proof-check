@@ -2,6 +2,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Vampire.Benchmark.Main
@@ -10,15 +11,19 @@ module Vampire.Benchmark.Main
   ) where
 
 -- base
-import Control.Exception (assert)
+import Control.Concurrent (threadDelay)
+import Control.Exception (onException, assert)
 import Control.Monad (when)
 import System.Exit (ExitCode(..), exitFailure)
 import System.IO
-  (hClose, IOMode(WriteMode), withFile, hPutStrLn, hPrint, hSetBuffering, stderr, stdout,
+  (Handle, hClose, IOMode(WriteMode), withFile, hPutStrLn, hPrint, hSetBuffering, stderr, stdout,
    BufferMode(NoBuffering))
 
 -- async
-import Control.Concurrent.Async (wait, link, async)
+import Control.Concurrent.Async (race, wait, link, async)
+
+-- managed
+import Control.Monad.Managed
 
 -- mtl
 import Control.Monad.Reader
@@ -33,13 +38,14 @@ import Path.IO (ensureDir, WalkAction(..), doesFileExist, walkDirRel, walkDir)
 import System.Process
 
 -- time
-import Data.Time.Clock (diffTimeToPicoseconds, picosecondsToDiffTime, DiffTime)
+import Data.Time.Clock (secondsToDiffTime, diffTimeToPicoseconds, picosecondsToDiffTime, DiffTime)
 
 -- unagi-chan
 import qualified Control.Concurrent.Chan.Unagi as Unagi
 import qualified Control.Concurrent.Chan.Unagi.Bounded as Unagi.Bounded
 
 -- vampire-tools
+import qualified System.Console.ProgressReporter as ProgressReporter
 import Vampire.Benchmark.Options
 
 
@@ -51,6 +57,7 @@ data Env co = Env
   , envCmdOptions :: co
   , logger :: Logger
   }
+
 
 main :: IO ()
 main = do
@@ -72,41 +79,49 @@ mainWithOptions opts@Options{optDebug,optCommand} = do
 
 
 runBenchmarks :: Options -> RunOptions -> IO ()
-runBenchmarks options runOptions@RunOptions{rOptProblemRoot,rOptNumWorkers} = do
-  let queueBound = rOptNumWorkers + 1
+runBenchmarks options@Options{optVerbose} runOptions@RunOptions{rOptProblemRoot,rOptNumWorkers} = do
 
-  -- Create task channel.
-  -- It is a bounded queue so we don't exhaust memory if we are working through a huge directory tree.
-  (tasksIn, tasksOut) <-
-    Unagi.Bounded.newChan @Task queueBound
+  let prCfg = ProgressReporter.Config
+        { enabled = optVerbose
+        , statusLinePrefix = "Benchmarking: "
+        , outputHandle = stdout
+        }
 
-  -- Launch workers
-  workers <-
-    replicateM rOptNumWorkers (async $ worker options runOptions tasksOut)
+  ProgressReporter.withNew prCfg $ \pr -> do
+    let queueBound = rOptNumWorkers + 1
 
-  -- Link exceptions in workers to current thread
-  -- (this means if a worker throws an exception, it will be re-raised in the current thread)
-  mapM_ link workers
+    -- Create task channel.
+    -- It is a bounded queue so we don't exhaust memory if we are working through a huge directory tree.
+    (tasksIn, tasksOut) <-
+      Unagi.Bounded.newChan @Task queueBound
 
-  -- Walk through problems directory and create tasks
-  let createTask :: Path Rel Dir -> [Path Rel Dir] -> [Path Rel File] -> IO (WalkAction Rel)
-      createTask dir _subdirs files = do
-        forM_ files $ \file -> do
-          putStrLn $ "Creating task from file: " <> show file
-          p <- mkProblem runOptions (dir </> file)
-          isDone <- checkProblemIsDone p
-          unless isDone $ Unagi.Bounded.writeChan tasksIn (Process p)
-        return (WalkExclude [])
-  walkDirRel createTask rOptProblemRoot
+    -- Launch workers
+    workers <-
+      replicateM rOptNumWorkers (async $ worker options runOptions pr tasksOut)
 
-  -- Stop workers
-  replicateM_ rOptNumWorkers (Unagi.Bounded.writeChan tasksIn Stop)
-  mapM_ wait workers
+    -- Link exceptions in workers to current thread
+    -- (this means if a worker throws an exception, it will be re-raised in the current thread)
+    mapM_ link workers
+
+    -- Walk through problems directory and create tasks
+    let createTask :: Path Rel Dir -> [Path Rel Dir] -> [Path Rel File] -> IO (WalkAction Rel)
+        createTask dir _subdirs files = do
+          forM_ files $ \file -> do
+            -- putStrLn $ "Creating task from file: " <> show (dir </> file)
+            p <- mkProblem runOptions (dir </> file)
+            isDone <- checkProblemIsDone p
+            unless isDone $ Unagi.Bounded.writeChan tasksIn (Process p)
+          return (WalkExclude [])
+    walkDirRel createTask rOptProblemRoot
+
+    -- Stop workers
+    replicateM_ rOptNumWorkers (Unagi.Bounded.writeChan tasksIn Stop)
+    mapM_ wait workers
 
 
 
-worker :: Options -> RunOptions -> Unagi.Bounded.OutChan Task -> IO ()
-worker options runOptions tasksOut = work
+worker :: Options -> RunOptions -> ProgressReporter.Handle t -> Unagi.Bounded.OutChan Task -> IO ()
+worker options runOptions pr tasksOut = work
   where
     work = do
       task <- Unagi.Bounded.readChan tasksOut
@@ -114,45 +129,63 @@ worker options runOptions tasksOut = work
         Stop ->
           return ()
         Process problem -> do
-          processProblem options runOptions problem
+          processProblem options runOptions pr problem
           work
 
 
-processProblem :: Options -> RunOptions -> Problem -> IO ()
-processProblem options RunOptions{rOptVampireExe,rOptVampireOptions,rOptVampireWorkDir,rOptVampireTimeout} problem@Problem{problemFile,problemOutputDir} = do
+processProblem :: Options -> RunOptions -> ProgressReporter.Handle t -> Problem -> IO ()
+processProblem options RunOptions{rOptVampireExe,rOptVampireOptions,rOptVampireWorkDir,rOptVampireTimeout} pr problem@Problem{problemFile,problemName,problemOutputDir} = runManaged $ do
+
   ensureDir problemOutputDir
 
-  withFile (fromAbsFile $ problemStdoutFile problem) WriteMode $ \hOut ->
-    withFile (fromAbsFile $ problemStderrFile problem) WriteMode $ \hErr -> do
+  token <- managed $ ProgressReporter.withTask pr problemName (problemName <> ": error")
 
-      putStrLn $ "Begin processing problem: " <> show problemFile
+  hOut <- managed $ withFile (fromAbsFile $ problemStdoutFile problem) WriteMode
+  hErr <- managed $ withFile (fromAbsFile $ problemStderrFile problem) WriteMode
 
-      let
-        vampireArgs =
-          [ "--time_limit", show (diffTimeToSeconds rOptVampireTimeout) ]
-          ++ rOptVampireOptions
-          ++ [ fromAbsFile problemFile ]
+  let
+    vampireArgs =
+      [ "--time_limit", show (diffTimeToSeconds rOptVampireTimeout) ]
+      ++ rOptVampireOptions
+      ++ [ fromAbsFile problemFile ]
 
-        defaultProcessInfo =
-          proc rOptVampireExe vampireArgs
+    defaultProcessInfo =
+      proc rOptVampireExe vampireArgs
 
-        processInfo =
-          defaultProcessInfo
-          { cwd = Just (fromAbsDir rOptVampireWorkDir)
-          , env = Nothing
-          , std_in = CreatePipe
-          , std_out = UseHandle hOut
-          , std_err = UseHandle hErr
-          , close_fds = True
-          }
+    processInfo =
+      defaultProcessInfo
+      { cwd = Just (fromAbsDir rOptVampireWorkDir)
+      , env = Nothing
+      , std_in = CreatePipe
+      , std_out = UseHandle hOut
+      , std_err = UseHandle hErr
+      , close_fds = True
+      }
 
-      (Just hIn, Nothing, Nothing, process) <- createProcess processInfo
+  handles <- managed $ withCreateProcess' processInfo
+  case handles of
+    (Just hIn, Nothing, Nothing, process) -> liftIO $ do
       hClose hIn
 
-      exitcode <- waitForProcess process
-      writeFile (fromAbsFile $ problemExitcodeFile problem) (show (exitcodeToInt exitcode) <> "\n")
+      -- Wait up to ten seconds until the vampire process is killed when it goes overtime
+      let tolerance = secondsToDiffTime 10
 
-      putStrLn $ "Done processing problem: " <> show problemFile
+      eExitcode <-
+        race (waitForProcess process
+              `onException` terminateProcess process)
+             (threadDelay (diffTimeToMicroseconds $ rOptVampireTimeout + tolerance)
+              >> terminateProcess process)  -- TODO: send SIGKILL in this case?
+
+      case eExitcode of
+        Left exitcode -> do
+          writeFile (fromAbsFile $ problemExitcodeFile problem) (show (exitcodeToInt exitcode) <> "\n")
+          -- TODO: Extract result to szs file
+          ProgressReporter.reportEnd pr token (problemName <> ": done")  -- TODO: more info
+        Right () -> do
+          ProgressReporter.reportEnd pr token (problemName <> ": killed vampire because it got stuck")
+
+    _ ->
+      error "impossible"
 
 
 exitcodeToInt :: ExitCode -> Int
@@ -162,13 +195,32 @@ exitcodeToInt (ExitFailure n) = assert (n /= 0) n
 diffTimeToSeconds :: DiffTime -> Integer
 diffTimeToSeconds = (`div` 1_000_000_000_000) . diffTimeToPicoseconds
 
+diffTimeToMicroseconds :: DiffTime -> Int
+diffTimeToMicroseconds = fromIntegral . (`div` 1_000_000) . diffTimeToPicoseconds
+
+-- killProcess :: ProcessHandle -> IO ()
+-- killProcess process = do
+--   mpid <- getPid process
+--   case mpid of
+--     Nothing -> return ()
+--     Just pid -> error "TODO"
+
+withCreateProcess' :: CreateProcess -> ((Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO r) -> IO r
+withCreateProcess' cp f = withCreateProcess cp (curry4 f)
+{-# INLINE withCreateProcess' #-}
+
+curry4 :: ((a, b, c, d) -> e) -> a -> b -> c -> d -> e
+curry4 f a b c d = f (a, b, c, d)
+{-# INLINE curry4 #-}
+
 data Task
   = Process !Problem
   | Stop
 
 
 data Problem = Problem
-  { problemFile :: !(Path Abs File)
+  { problemName :: ! String
+  , problemFile :: !(Path Abs File)
   , problemOutputDir :: !(Path Abs Dir)
   }
   deriving Show
@@ -191,8 +243,9 @@ problemSZSFile Problem{problemOutputDir} =
 
 mkProblem :: RunOptions -> Path Rel File -> IO Problem
 mkProblem RunOptions{rOptProblemRoot,rOptDataDir} file = do
-  outputDir <- parseRelDir (toFilePath $ filename file)
-  return Problem{ problemFile = rOptProblemRoot </> file
+  outputDir <- parseRelDir (fromRelFile file)
+  return Problem{ problemName = toFilePath file
+                , problemFile = rOptProblemRoot </> file
                 , problemOutputDir = rOptDataDir </> outputDir
                 }
 

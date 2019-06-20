@@ -42,6 +42,7 @@ library
                   , directory
                   , exceptions
                   , filepath
+                  , managed
                   , megaparsec
                   , mtl
                   , optparse-applicative
