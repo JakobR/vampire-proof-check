@@ -1,4 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -7,12 +8,14 @@ module System.Console.ProgressReporter
   , Handle
   , reportStart
   , reportEnd
+  , putMessage
+  , withTask
   , TaskName
   , withNew
   ) where
 
 -- base
-import Control.Exception (onException)
+import Control.Exception (bracket, onException)
 import Control.Monad (when)
 import Data.List (intercalate)
 import System.IO (hPutStrLn, hPutStr)
@@ -46,7 +49,20 @@ data Config = Config
 data Handle t = Handle
   { reportStart :: TaskName -> IO t
   , reportEnd :: t -> String -> IO ()
+  , putMessage :: String -> IO ()
   }
+
+
+withTask
+  :: Handle t
+  -> TaskName
+  -> String  -- ^ default task end message to display
+  -> (t -> IO r)
+  -> IO r
+withTask h name defaultEndMessage = do
+  bracket
+    (reportStart h name)
+    (\t -> reportEnd h t defaultEndMessage)
 
 
 type TaskName = String
@@ -69,6 +85,7 @@ data OutputThreadEnv = OutputThreadEnv
 data Command
   = TaskStart !Token !TaskName
   | TaskEnd !Token !String
+  | Message !String
   | Stop !String
 
 
@@ -87,15 +104,20 @@ create Config{..} = do
 
 
 reportStart' :: InternalEnv -> TaskName -> IO Token
-reportStart' InternalEnv{..} name = atomically $ do
+reportStart' InternalEnv{getNextToken,sendCommand} name = atomically $ do
   token <- getNextToken
   sendCommand (TaskStart token name)
   return token
 
 
 reportEnd' :: InternalEnv -> Token -> String -> IO ()
-reportEnd' InternalEnv{..} token msg = atomically $
+reportEnd' InternalEnv{sendCommand} token msg = atomically $
   sendCommand (TaskEnd token msg)
+
+
+putMessage' :: InternalEnv -> String -> IO ()
+putMessage' InternalEnv{sendCommand} msg = atomically $
+  sendCommand (Message msg)
 
 
 withNew :: Config -> (forall t. Handle t -> IO a) -> IO a
@@ -107,7 +129,7 @@ withNew cfg action
 withNewEnabled :: Config -> (forall t. Handle t -> IO a) -> IO a
 withNewEnabled cfg action = do
   -- NOTE: no need to use bracket for `create`, since we don't allocate
-  -- any lasting resources (we don't even have corresponding `destroy`)
+  -- any lasting resources (we don't even have a corresponding `destroy`)
   (iEnv, oEnv) <- create cfg
 
   withAsync (outputThread oEnv) $ \outputAsync -> do
@@ -115,11 +137,13 @@ withNewEnabled cfg action = do
     let handle =
           Handle{ reportStart = reportStart' iEnv
                 , reportEnd = reportEnd' iEnv
+                , putMessage = putMessage' iEnv
                 }
 
     x <-
       action handle
-      `onException` (sendCommandIO iEnv (Stop "Aborted.") >> wait outputAsync)
+      `onException` (sendCommandIO iEnv (Stop "Aborted.")
+                     >> wait outputAsync)
 
     sendCommandIO iEnv (Stop "Complete.")
     wait outputAsync
@@ -141,12 +165,22 @@ outputThread OutputThreadEnv{..} = go mempty
         updateStatusLine newTasks Nothing
       go newTasks
 
-    handle (TaskEnd token msg) oldTasks = do
-      let newTasks = IntMap.delete token oldTasks
+    handle (TaskEnd token msg) oldTasks
+      | token `IntMap.member` oldTasks = do
+          let newTasks = IntMap.delete token oldTasks
+          if useStatusLine
+            then updateStatusLine newTasks (Just msg)
+            else hPutStrLn outputHandle msg
+          go newTasks
+      | otherwise =
+          -- TaskEnd for this task has already been reported
+          go oldTasks
+
+    handle (Message msg) tasks = do
       if useStatusLine
-        then updateStatusLine newTasks (Just msg)
+        then updateStatusLine tasks (Just msg)
         else hPutStrLn outputHandle msg
-      go newTasks
+      go tasks
 
     handle (Stop msg) _ = do
       when useStatusLine clearStatusLine
@@ -173,6 +207,7 @@ noOpHandle :: Handle ()
 noOpHandle = Handle
   { reportStart = \_ -> pure ()
   , reportEnd = \_ _ -> pure ()
+  , putMessage = \_ -> pure ()
   }
 
 
