@@ -46,6 +46,9 @@ import Data.Time.LocalTime (getZonedTime)
 import qualified Control.Concurrent.Chan.Unagi as Unagi
 import qualified Control.Concurrent.Chan.Unagi.Bounded as Unagi.Bounded
 
+-- unix
+import System.Posix.Signals (signalProcess, sigKILL)
+
 -- vampire-tools
 import qualified System.Console.ProgressReporter as ProgressReporter
 import Vampire.Benchmark.Options
@@ -131,6 +134,7 @@ worker options runOptions pr tasksOut = work
         Stop ->
           return ()
         Process problem -> do
+          -- TODO: catch exceptions of processProblem here?
           processProblem options runOptions pr problem
           work
 
@@ -174,9 +178,9 @@ processProblem options RunOptions{rOptVampireExe,rOptVampireOptions,rOptVampireW
 
       eExitcode <-
         race (waitForProcess process
-              `onException` terminateProcess process)
+              `onException` killProcess process)
              (threadDelay (diffTimeToMicroseconds $ rOptVampireTimeout + tolerance)
-              >> terminateProcess process)  -- TODO: send SIGKILL in this case?
+              >> killProcess process)
 
       endTime <- formatTime (error "no time locale") "%0Y-%m-%d %H:%M:%S %Z" <$> getZonedTime
       let msgPrefix = "[" <> endTime <> "] " <> problemName <> ": "
@@ -185,7 +189,8 @@ processProblem options RunOptions{rOptVampireExe,rOptVampireOptions,rOptVampireW
         Left exitcode -> do
           writeFile (fromAbsFile $ problemExitcodeFile problem) (show (exitcodeToInt exitcode) <> "\n")
           -- TODO: Extract result to szs file
-          ProgressReporter.reportEnd pr token (msgPrefix <> "done")  -- TODO: more info
+          -- TODO: more info in end message
+          ProgressReporter.reportEnd pr token (msgPrefix <> "done (" <> show exitcode <> ")")
         Right () -> do
           ProgressReporter.reportEnd pr token (msgPrefix <> "killed vampire because it got stuck")
 
@@ -203,12 +208,13 @@ diffTimeToSeconds = (`div` 1_000_000_000_000) . diffTimeToPicoseconds
 diffTimeToMicroseconds :: DiffTime -> Int
 diffTimeToMicroseconds = fromIntegral . (`div` 1_000_000) . diffTimeToPicoseconds
 
--- killProcess :: ProcessHandle -> IO ()
--- killProcess process = do
---   mpid <- getPid process
---   case mpid of
---     Nothing -> return ()
---     Just pid -> error "TODO"
+-- | Send SIGKILL to the given process to terminate it immediately with no chance to react.
+killProcess :: ProcessHandle -> IO ()
+killProcess process = do
+  mpid <- getPid process
+  case mpid of
+    Nothing -> return ()
+    Just pid -> signalProcess sigKILL pid
 
 withCreateProcess' :: CreateProcess -> ((Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle) -> IO r) -> IO r
 withCreateProcess' cp f = withCreateProcess cp (curry4 f)
